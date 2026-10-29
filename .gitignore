@@ -1,0 +1,12 @@
+# Nunca subir datos reales de la empresa
+*.xlsx
+!datos_prueba_ficticios.xlsx
+*.xls
+*.csv
+*.zip
+_seed*/
+_redistrib/
+_tmp*/
+COWORK/
+*.jpg
+*.png

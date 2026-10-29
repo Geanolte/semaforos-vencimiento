@@ -1,0 +1,1590 @@
+<title>Semáforos de Vencimiento</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Quicksand:wght@500;600;700&family=Plus+Jakarta+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<style>
+:root{
+  color-scheme: light;
+  --bg:#FBF8F2;
+  --surface:#FFFFFF;
+  --surface-2:#F3ECDB;
+  --surface-3:#E9DEC4;
+  --border:#E7DCC1;
+  --ink:#2E2618;
+  --ink-soft:#6B5D4C;
+  --muted:#9A8D78;
+  --accent:#B99A63;
+  --accent-strong:#9C7C47;
+  --accent-bg:#F3E9D3;
+  --on-accent:#FFFFFF;
+  --shadow:0 1px 2px rgba(46,38,24,.05), 0 10px 28px -16px rgba(46,38,24,.18);
+  --radius-sm:10px; --radius-md:16px; --radius-lg:22px; --radius-pill:999px;
+  --green:#2E8B57; --green-bg:#E4F3EA;
+  --amber:#B8860B; --amber-bg:#FBF1D9;
+  --s-2:#E0AE1F; --s-3:#1E6B3E; --s-4:#8FCB7E; --s3-bg:#DDEFE3; --s4-bg:#EAF6E4; --s4-ink:#3F7A2E;
+  --red:#C4453A; --red-bg:#FAE7E4;
+  --critical:#7A2048; --critical-bg:#F5E2EA;
+  --danger:#C4453A; --danger-bg:#FAE7E4;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    color-scheme: dark;
+    --bg:#17130E; --surface:#221C15; --surface-2:#2B241A; --surface-3:#362D20;
+    --border:#463A28; --ink:#F5EFE2; --ink-soft:#D2C1A3; --muted:#A79980;
+    --accent:#D2B378; --accent-strong:#E6C88F; --accent-bg:#332A1B; --on-accent:#241A0C;
+    --shadow:0 1px 2px rgba(0,0,0,.35), 0 14px 32px -18px rgba(0,0,0,.55);
+    --green:#6FBB8B; --green-bg:#1B2B21; --amber:#E0BD63; --amber-bg:#332918;
+    --s-2:#EBC13F; --s-3:#2F9A5C; --s-4:#A6DB95; --s3-bg:#18301F; --s4-bg:#1E2B1A; --s4-ink:#A6DB95;--red:#E5978C; --red-bg:#332019;
+    --critical:#D391AE; --critical-bg:#2E1A24;
+    --danger:#E5978C; --danger-bg:#332019;
+  }
+}
+:root[data-theme="dark"]{
+  color-scheme: dark;
+  --bg:#17130E; --surface:#221C15; --surface-2:#2B241A; --surface-3:#362D20;
+  --border:#463A28; --ink:#F5EFE2; --ink-soft:#D2C1A3; --muted:#A79980;
+  --accent:#D2B378; --accent-strong:#E6C88F; --accent-bg:#332A1B; --on-accent:#241A0C;
+  --shadow:0 1px 2px rgba(0,0,0,.35), 0 14px 32px -18px rgba(0,0,0,.55);
+  --green:#6FBB8B; --green-bg:#1B2B21; --amber:#E0BD63; --amber-bg:#332918;
+  --s-2:#EBC13F; --s-3:#2F9A5C; --s-4:#A6DB95; --s3-bg:#18301F; --s4-bg:#1E2B1A; --s4-ink:#A6DB95;--red:#E5978C; --red-bg:#332019;
+  --critical:#D391AE; --critical-bg:#2E1A24;
+  --danger:#E5978C; --danger-bg:#332019;
+}
+
+*{box-sizing:border-box}
+html,body{height:100%}
+body{
+  margin:0;
+  background:var(--bg);
+  color:var(--ink);
+  font-family:"Plus Jakarta Sans",-apple-system,Segoe UI,sans-serif;
+  font-size:15.5px;
+  line-height:1.5;
+}
+h1,h2,h3{ font-family:"Quicksand","Plus Jakarta Sans",sans-serif; color:var(--ink); text-wrap:balance; margin:0; font-weight:700; }
+code,.mono{font-family:"IBM Plex Mono",ui-monospace,Consolas,monospace;}
+button, input, select{ font-family:inherit; font-size:inherit; color:inherit; }
+input:focus-visible, button:focus-visible, select:focus-visible{ outline:2px solid var(--accent); outline-offset:1px; }
+
+#app{ min-height:100%; }
+
+/* ---------- shell / topbar ---------- */
+.topbar{
+  position:sticky; top:0; z-index:20;
+  display:flex; align-items:center; justify-content:space-between; gap:12px;
+  padding:12px 18px; background:var(--surface); border-bottom:1px solid var(--border);
+}
+.brand{ display:flex; align-items:center; gap:9px; }
+.brand .mark{ width:26px; height:38px; flex:0 0 auto; }
+.brand b{ font-family:"Quicksand",sans-serif; font-size:17px; font-weight:700; }
+.brand .sub{ font-size:11px; color:var(--muted); font-family:"IBM Plex Mono",monospace; letter-spacing:.04em; }
+.who{ display:flex; align-items:center; gap:10px; font-size:13px; color:var(--ink-soft); }
+.who .name{ color:var(--ink); font-weight:600; }
+.who button{ background:none; border:1px solid var(--border); color:var(--ink-soft); border-radius:var(--radius-pill); padding:6px 14px; cursor:pointer; font-size:12.5px; }
+.who button:hover{ border-color:var(--accent); color:var(--accent); }
+#themeToggle{ padding:0; width:32px; height:32px; display:inline-flex; align-items:center; justify-content:center; font-size:15px; line-height:1; background:var(--surface-2); }
+
+.wrap{ max-width:1080px; margin:0 auto; padding:22px 18px 80px; }
+.wrap.narrow{ max-width:480px; }
+
+/* ---------- generic ---------- */
+.btn{
+  display:inline-flex; align-items:center; justify-content:center; gap:7px;
+  border:1px solid var(--border); background:var(--surface); color:var(--ink);
+  border-radius:var(--radius-pill); padding:10px 18px; font-weight:600; font-size:14px; cursor:pointer;
+  box-shadow:var(--shadow);
+}
+.btn:hover{ border-color:var(--accent); }
+.btn.primary{ background:var(--accent); border-color:var(--accent); color:var(--on-accent); }
+.btn.primary:hover{ background:var(--accent-strong); border-color:var(--accent-strong); }
+.btn.ghost{ background:none; box-shadow:none; }
+.btn.danger{ color:var(--danger); border-color:var(--danger-bg); }
+.btn.danger:hover{ border-color:var(--danger); }
+.btn.block{ width:100%; }
+.btn:disabled{ opacity:.45; cursor:not-allowed; }
+.btn.sm{ padding:7px 14px; font-size:12.5px; }
+
+.card{ background:var(--surface); border:1px solid var(--border); border-radius:var(--radius-lg); padding:22px; box-shadow:var(--shadow); }
+.card + .card{ margin-top:16px; }
+.field{ margin-bottom:14px; }
+.field label{ display:block; font-size:12.5px; font-weight:600; color:var(--ink-soft); margin-bottom:5px; text-transform:uppercase; letter-spacing:.04em; }
+.field input, .field select{
+  width:100%; padding:11px 14px; border:1.5px solid var(--border); border-radius:var(--radius-md);
+  background:var(--bg); color:var(--ink);
+}
+.hint{ font-size:12.5px; color:var(--muted); margin-top:4px; }
+
+.pill{ display:inline-flex; align-items:center; gap:5px; padding:3px 10px; border-radius:999px; font-size:11.5px; font-weight:700; font-family:"IBM Plex Mono",monospace; white-space:nowrap; }
+.pill.green{ background:var(--green-bg); color:var(--green); }
+.pill.amber{ background:var(--amber-bg); color:var(--amber); }
+.pill.dgreen{ background:var(--s3-bg); color:var(--s-3); }
+.pill.lgreen{ background:var(--s4-bg); color:var(--s4-ink); }
+.pill.red{ background:var(--red-bg); color:var(--red); }
+.pill.critical{ background:var(--critical-bg); color:var(--critical); }
+.pill.neutral{ background:var(--surface-2); color:var(--muted); border:1px solid var(--border); }
+.pill.dot::before{ content:"●"; font-size:9px; }
+
+.eyebrow{ font-family:"IBM Plex Mono",monospace; font-size:11px; letter-spacing:.12em; text-transform:uppercase; color:var(--accent); margin:0 0 6px; }
+
+.tablewrap{ overflow-x:auto; }
+table{ border-collapse:collapse; width:100%; font-size:13.5px; }
+th,td{ text-align:left; padding:9px 10px; border-bottom:1px solid var(--border); vertical-align:middle; }
+th{ font-family:"IBM Plex Mono",monospace; font-size:10.5px; letter-spacing:.05em; text-transform:uppercase; color:var(--muted); font-weight:600; white-space:nowrap; }
+tr.sel{ background:var(--accent-bg); }
+td.num{ font-variant-numeric:tabular-nums; font-family:"IBM Plex Mono",monospace; }
+
+.empty{ text-align:center; padding:40px 20px; color:var(--muted); }
+
+.tabs{ display:flex; gap:6px; margin-bottom:16px; border-bottom:1px solid var(--border); }
+.tabs button{ background:none; border:none; padding:10px 4px; margin-right:14px; font-weight:600; color:var(--muted); cursor:pointer; border-bottom:2px solid transparent; font-size:14px; }
+.tabs button.active{ color:var(--ink); border-color:var(--accent); }
+
+.grid-stats{ display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:12px; margin-bottom:18px; }
+.stat{ background:var(--surface); border:1px solid var(--border); border-radius:var(--radius-md); padding:14px 18px; box-shadow:var(--shadow); }
+.stat .n{ font-family:"IBM Plex Mono",monospace; font-size:24px; font-weight:600; font-variant-numeric:tabular-nums; }
+.stat .l{ font-size:12px; color:var(--muted); margin-top:2px; }
+
+.modal-bg{ position:fixed; inset:0; background:rgba(42,34,20,.45); display:flex; align-items:flex-end; justify-content:center; z-index:50; }
+@media (min-width:640px){ .modal-bg{ align-items:center; } }
+.modal{ background:var(--surface); border:1px solid var(--border); border-radius:24px 24px 0 0; padding:24px; width:100%; max-width:460px; max-height:88vh; overflow-y:auto; box-shadow:0 -8px 30px rgba(46,38,24,.2); }
+@media (min-width:640px){ .modal{ border-radius:24px; } }
+.modal-head{ display:flex; align-items:center; justify-content:space-between; margin-bottom:14px; }
+.modal-head button{ background:none; border:none; font-size:20px; color:var(--muted); cursor:pointer; line-height:1; }
+
+.banner{ border-left:3px solid var(--accent); background:var(--accent-bg); border-radius:0 var(--radius-md) var(--radius-md) 0; padding:12px 16px; font-size:13.5px; margin-bottom:16px; }
+.banner.warn{ border-color:var(--amber); background:var(--amber-bg); }
+/* ---------- informe de semáforo ---------- */
+.bg-v{ background:var(--critical); } .bg-1{ background:var(--red); } .bg-2{ background:var(--s-2); } .bg-3{ background:var(--s-3); } .bg-4{ background:var(--s-4); }
+.ix-bar{ display:flex; flex-wrap:wrap; gap:10px; align-items:center; margin-bottom:14px; }
+.ix-bar input, .ix-bar select{ padding:9px 12px; border:1.5px solid var(--border); border-radius:var(--radius-md); background:var(--surface); min-width:0; }
+.ix-bar .grow{ flex:1 1 180px; max-width:320px; }
+.ix-chip{ display:inline-flex; gap:6px; align-items:center; border:1px solid var(--accent); border-radius:999px; padding:3px 4px 3px 12px; font-size:13px; background:var(--surface); }
+.ix-chip button{ background:none; border:0; cursor:pointer; color:var(--ink-soft); font-size:16px; line-height:1; padding:2px 6px; }
+.kpis{ display:grid; grid-template-columns:repeat(auto-fit,minmax(165px,1fr)); gap:12px; margin-bottom:18px; }
+.kpi{ background:var(--surface); border:1px solid var(--border); border-radius:var(--radius-md); padding:13px 16px; box-shadow:var(--shadow); min-width:0; }
+.kpi .l{ font-size:12.5px; font-weight:700; color:var(--muted); }
+.kpi .v{ font-size:24px; font-weight:800; font-variant-numeric:tabular-nums; line-height:1.2; overflow-wrap:anywhere; }
+.kpi .n{ font-size:12px; color:var(--muted); min-height:1.2em; }
+.kpi.crit{ border-top:3px solid var(--critical); } .kpi.risk{ border-top:3px solid var(--red); } .kpi.warn{ border-top:3px solid var(--s-2); }
+.ix-grid{ display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,400px),1fr)); gap:16px; margin-bottom:16px; }
+.ix-grid > .card, .card.ix{ margin-top:0; display:flex; flex-direction:column; gap:12px; min-width:0; }
+.card .hd h3{ font-size:16px; } .card .hd p{ margin:2px 0 0; color:var(--muted); font-size:12.5px; }
+.band-row{ display:grid; grid-template-columns:130px 1fr auto; gap:12px; align-items:center; padding:8px 10px; border-radius:12px; border:1px solid transparent; background:transparent; width:100%; text-align:left; cursor:pointer; color:inherit; }
+.band-row:hover{ background:var(--surface-2); }
+.band-row[aria-pressed=true]{ border-color:var(--accent); background:var(--surface-2); }
+.band-row .nm{ display:flex; gap:8px; align-items:center; font-weight:600; font-size:13px; }
+.dotc{ width:10px; height:10px; border-radius:50%; flex:none; display:inline-block; }
+.bar-track{ height:12px; background:var(--surface-3); border-radius:999px; position:relative; display:flex; overflow:hidden; }
+.bar-seg{ height:100%; min-width:0; }
+.band-row .num{ text-align:right; font-variant-numeric:tabular-nums; font-size:13px; line-height:1.25; }
+.band-row .num b{ display:block; } .band-row .num span{ color:var(--muted); font-size:12px; }
+.seg{ display:inline-flex; border:1px solid var(--border); border-radius:999px; overflow:hidden; align-self:flex-start; }
+.seg button{ background:transparent; border:0; padding:6px 14px; cursor:pointer; color:var(--ink-soft); }
+.seg button[aria-pressed=true]{ background:var(--accent); color:var(--on-accent); font-weight:700; }
+.legend{ display:flex; flex-wrap:wrap; gap:6px 16px; font-size:12.5px; color:var(--ink-soft); }
+.legend span{ display:inline-flex; gap:6px; align-items:center; }
+.alerts, .top10{ display:flex; flex-direction:column; gap:8px; margin:0; padding:0; list-style:none; }
+.alert{ display:grid; grid-template-columns:auto 1fr auto; gap:12px; align-items:center; padding:10px 12px; border:1px solid var(--border); border-left:4px solid var(--red); border-radius:12px; background:var(--bg); min-width:0; }
+.alert.venc{ border-left-color:var(--critical); }
+.alert .t b{ display:block; overflow-wrap:anywhere; } .alert .t span{ color:var(--muted); font-size:12.5px; }
+.alert .m{ font-weight:800; font-size:16px; font-variant-numeric:tabular-nums; white-space:nowrap; }
+.t10{ display:grid; grid-template-columns:28px 1fr; gap:10px; padding:8px 4px; border-bottom:1px solid var(--border); align-items:start; }
+.t10:last-child{ border-bottom:0; }
+.t10 .rk{ font-family:"Quicksand",sans-serif; font-weight:700; font-size:24px; color:var(--accent-strong); line-height:1; }
+.t10 .meta{ display:flex; flex-wrap:wrap; gap:4px 12px; font-size:12.5px; color:var(--muted); margin-top:2px; align-items:center; }
+.t10 .val{ font-variant-numeric:tabular-nums; font-weight:700; margin-left:auto; color:var(--ink); }
+.t10 .bar{ height:7px; background:var(--surface-3); border-radius:999px; margin-top:6px; position:relative; }
+.t10 .bar i{ position:absolute; left:0; top:0; bottom:0; border-radius:999px; }
+.note{ font-size:12px; color:var(--muted); margin:0; }
+.ix-table{ overflow:auto; max-height:560px; border-radius:var(--radius-md); }
+.ix-table table{ min-width:860px; }
+.ix-table th{ position:sticky; top:0; background:var(--surface-2); cursor:pointer; user-select:none; }
+.ix-table th[aria-sort=ascending]::after{ content:" ▲"; font-size:10px; } .ix-table th[aria-sort=descending]::after{ content:" ▼"; font-size:10px; }
+@media (max-width:560px){ .band-row{ grid-template-columns:1fr auto; } .band-row .bar-track{ grid-column:1/-1; order:3; } .alert{ grid-template-columns:1fr auto; } .alert .pill{ grid-column:1/-1; } }
+
+/* ---------- login ---------- */
+.login-shell{ min-height:100vh; display:flex; align-items:center; justify-content:center; padding:24px; }
+.login-card{ width:100%; max-width:400px; }
+.login-card .mark-big{ width:44px; height:66px; margin-bottom:16px; }
+.role-choice{ display:grid; grid-template-columns:repeat(auto-fit,minmax(96px,1fr)); gap:10px; margin-bottom:16px; }
+.role-btn{ border:1.5px solid var(--border); background:var(--surface); border-radius:var(--radius-md); padding:15px 10px; text-align:center; cursor:pointer; }
+.role-btn b{ display:block; font-size:14px; margin-bottom:2px; }
+.role-btn span{ font-size:11.5px; color:var(--muted); }
+.role-btn.sel{ border-color:var(--accent); background:var(--accent-bg); }
+
+/* ---------- operario product list ---------- */
+.item-row{ display:flex; align-items:center; gap:12px; padding:14px 16px; background:var(--surface); border:1px solid var(--border); border-radius:var(--radius-md); margin-bottom:9px; cursor:pointer; }
+.item-row:hover{ border-color:var(--accent); }
+.item-row .ico{ width:36px; height:36px; border-radius:12px; background:var(--surface-2); display:flex; align-items:center; justify-content:center; flex:0 0 auto; font-size:14px; }
+.item-row .info{ flex:1; min-width:0; }
+.item-row .info .t{ font-weight:600; font-size:14px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.item-row .info .m{ font-size:12px; color:var(--muted); font-family:"IBM Plex Mono",monospace; }
+
+.searchbar{ position:relative; margin-bottom:14px; }
+.searchbar input{ width:100%; padding:13px 16px; border:1.5px solid var(--border); border-radius:var(--radius-md); background:var(--surface); }
+
+.scan-btn{ display:flex; align-items:center; justify-content:center; gap:8px; width:100%; padding:15px; border-radius:var(--radius-pill); background:var(--accent); color:var(--on-accent); border:none; font-weight:700; font-size:15px; cursor:pointer; margin-bottom:14px; box-shadow:var(--shadow); }
+.scan-btn:hover{ background:var(--accent-strong); }
+
+.video-wrap{ position:relative; border-radius:var(--radius-lg); overflow:hidden; background:#000; margin-bottom:12px; aspect-ratio:4/3; }
+.video-wrap video{ width:100%; height:100%; object-fit:cover; display:block; }
+.video-wrap .frame{ position:absolute; inset:14%; border:2px solid #ffffffaa; border-radius:16px; pointer-events:none; overflow:hidden; }
+.video-wrap .frame .laser{ position:absolute; left:0; right:0; height:2px; background:linear-gradient(90deg, transparent, #ff4d4d 15%, #ff4d4d 85%, transparent); box-shadow:0 0 6px 1px rgba(255,77,77,.8); animation:laserSweep 1.6s ease-in-out infinite; }
+@media (prefers-reduced-motion: reduce){ .video-wrap .frame .laser{ animation:none; top:50%; } }
+@keyframes laserSweep{ 0%{ top:6%; } 50%{ top:94%; } 100%{ top:6%; } }
+
+.lote-row{ display:flex; align-items:center; justify-content:space-between; gap:10px; padding:10px 14px; background:var(--surface-2); border-radius:var(--radius-md); margin-bottom:7px; font-size:13.5px; }
+.lote-row .x{ background:none; border:none; color:var(--muted); cursor:pointer; font-size:15px; }
+
+.progress-bar{ height:8px; border-radius:var(--radius-pill); background:var(--surface-3); overflow:hidden; }
+.progress-bar > div{ height:100%; background:var(--accent); border-radius:var(--radius-pill); }
+
+.assign-check{ display:flex; align-items:center; gap:8px; }
+.assign-check input{ width:16px; height:16px; }
+
+.footer-note{ text-align:center; font-size:12px; color:var(--muted); margin-top:30px; }
+.qr-box{ display:flex; flex-direction:column; align-items:center; gap:10px; padding:10px 0; }
+.qr-box #qrcanvas{ background:#fff; padding:14px; border-radius:var(--radius-md); }
+</style>
+<script>try{ document.documentElement.setAttribute("data-theme", localStorage.getItem("semaforos_theme_v1") || "light"); }catch(e){ document.documentElement.setAttribute("data-theme","light"); }</script>
+
+<div id="app"></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@zxing/library@0.20.0/umd/index.min.js"></script>
+
+<script>
+(function(){
+"use strict";
+
+/* ================= utils ================= */
+function fmtNum(n, d){ if(n==null||isNaN(n)) return "—"; d=d==null?2:d; return Number(n).toLocaleString("es-CO",{minimumFractionDigits:d,maximumFractionDigits:d}); }
+function fmtMoney(n){ if(n==null||isNaN(n)) return "—"; return "$" + Math.round(n).toLocaleString("es-CO"); }
+function todayISO(){ var d=new Date(); return d.getFullYear()+"-"+("0"+(d.getMonth()+1)).slice(-2)+"-"+("0"+d.getDate()).slice(-2); }
+function fmtFecha(iso){ var p=String(iso||"").split("-"); return p.length===3 ? p[2]+"/"+p[1]+"/"+p[0] : (iso||""); }
+function diasEntre(fechaVenc, refISO){
+  return Math.round((new Date(fechaVenc+"T00:00:00") - new Date(refISO+"T00:00:00"))/86400000);
+}
+/* Semáforo según el informe vigente: 1-30 rojo, 31-60 amarillo, 61-90 verde oscuro, >90 verde claro.
+   "Vencido" (días <= 0) se conserva aquí porque la app es donde se detecta en el conteo físico. */
+var BANDAS = [
+  {id:"vencido", n:"Vencido",          cls:"critical", bg:"bg-v", w:1},
+  {id:"b1",      n:"De 1 a 30 días",   cls:"red",      bg:"bg-1", w:1},
+  {id:"b2",      n:"De 31 a 60 días",  cls:"amber",    bg:"bg-2", w:.6},
+  {id:"b3",      n:"De 61 a 90 días",  cls:"dgreen",   bg:"bg-3", w:.3},
+  {id:"b4",      n:"Más de 90 días",   cls:"lgreen",   bg:"bg-4", w:0}
+];
+var BANDA_POR_ID = {}; BANDAS.forEach(function(b){ BANDA_POR_ID[b.id] = b; });
+function bandaDe(dias){ return dias<=0?"vencido":dias<=30?"b1":dias<=60?"b2":dias<=90?"b3":"b4"; }
+function esc(s){ return String(s==null?"":s).replace(/[&<>"']/g, function(c){ return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]; }); }
+function uid(){ return Math.random().toString(36).slice(2,10) + Date.now().toString(36).slice(-4); }
+function iconSemaforo(){
+  return '<svg viewBox="0 0 32 48" xmlns="http://www.w3.org/2000/svg" style="width:100%;height:100%;display:block;">'+
+    '<rect x="1.5" y="1.5" width="29" height="45" rx="11" fill="#241B10" stroke="#3A2C1A" stroke-width="1"/>'+
+    '<circle cx="16" cy="12" r="7" fill="#3A2C1A"/>'+
+    '<circle cx="16" cy="12" r="5.5" fill="var(--red)"/>'+
+    '<circle cx="16" cy="24" r="7" fill="#3A2C1A"/>'+
+    '<circle cx="16" cy="24" r="5.5" fill="var(--amber)"/>'+
+    '<circle cx="16" cy="36" r="7" fill="#3A2C1A"/>'+
+    '<circle cx="16" cy="36" r="5.5" fill="var(--green)"/>'+
+  '</svg>';
+}
+function deriveNombreFromEmail(email){
+  var local = (String(email||"").split("@")[0]||"").replace(/[._-]+/g," ").trim();
+  if(!local) return email||"";
+  return local.split(" ").map(function(w){ return w.charAt(0).toUpperCase()+w.slice(1).toLowerCase(); }).join(" ");
+}
+function nombrePorEmail(email){
+  if(!email) return "";
+  var u = (state.usuarios||[]).find(function(x){ return x.email===String(email).toLowerCase(); });
+  return (u&&u.nombre) ? u.nombre : deriveNombreFromEmail(email);
+}
+function debounce(fn, ms){ var t; return function(){ var a=arguments,c=this; clearTimeout(t); t=setTimeout(function(){ fn.apply(c,a); }, ms); }; }
+
+/* ================= custom dialogs =================
+   The page is hosted inside Claude's own viewer chrome (an iframe), which
+   does not grant native window.alert/confirm/prompt — those calls silently
+   no-op there (confirm/prompt resolve false/null with no dialog ever shown,
+   alert does nothing), which is why destructive actions gated by confirm()
+   used to appear to "do nothing" with no error. These DOM-based modals use
+   the same .modal-bg/.modal markup as the rest of the app instead. */
+function notify(message){
+  return new Promise(function(resolve){
+    var m = document.createElement("div");
+    m.className = "modal-bg";
+    m.innerHTML = '<div class="modal" style="max-width:380px;">'+
+      '<p style="margin-bottom:18px;">'+esc(message)+'</p>'+
+      '<div style="display:flex;justify-content:flex-end;"><button class="btn primary" id="ntOk">Entendido</button></div>'+
+    '</div>';
+    document.body.appendChild(m);
+    function close(){ m.remove(); resolve(); }
+    m.querySelector("#ntOk").onclick = close;
+    m.onclick = function(e){ if(e.target===m) close(); };
+  });
+}
+function askConfirm(message){
+  return new Promise(function(resolve){
+    var m = document.createElement("div");
+    m.className = "modal-bg";
+    m.innerHTML = '<div class="modal" style="max-width:380px;">'+
+      '<p style="margin-bottom:18px;">'+esc(message)+'</p>'+
+      '<div style="display:flex;gap:10px;justify-content:flex-end;">'+
+        '<button class="btn" id="cnCancel">Cancelar</button>'+
+        '<button class="btn danger" id="cnOk">Confirmar</button>'+
+      '</div>'+
+    '</div>';
+    document.body.appendChild(m);
+    function close(v){ m.remove(); resolve(v); }
+    m.querySelector("#cnCancel").onclick = function(){ close(false); };
+    m.querySelector("#cnOk").onclick = function(){ close(true); };
+    m.onclick = function(e){ if(e.target===m) close(false); };
+  });
+}
+function askPrompt(message, defaultValue){
+  return new Promise(function(resolve){
+    var m = document.createElement("div");
+    m.className = "modal-bg";
+    m.innerHTML = '<div class="modal" style="max-width:380px;">'+
+      '<p style="margin-bottom:10px;">'+esc(message)+'</p>'+
+      '<div class="field"><input id="pmInput" value="'+esc(defaultValue||"")+'"></div>'+
+      '<div style="display:flex;gap:10px;justify-content:flex-end;">'+
+        '<button class="btn" id="pmCancel">Cancelar</button>'+
+        '<button class="btn primary" id="pmOk">Aceptar</button>'+
+      '</div>'+
+    '</div>';
+    document.body.appendChild(m);
+    function close(v){ m.remove(); resolve(v); }
+    m.querySelector("#pmCancel").onclick = function(){ close(null); };
+    m.querySelector("#pmOk").onclick = function(){ close(m.querySelector("#pmInput").value); };
+    m.querySelector("#pmInput").onkeydown = function(e){ if(e.key==="Enter") close(m.querySelector("#pmInput").value); };
+    m.onclick = function(e){ if(e.target===m) close(null); };
+    m.querySelector("#pmInput").focus();
+  });
+}
+
+/* ================= storage backend: db capability, fallback to localStorage ================= */
+var USE_DB = false, dbNs = null;
+var LS_KEY = "semaforos_demo_state_v1";
+var LS_AVAILABLE = true;
+try{ localStorage.setItem(LS_KEY+"__t","1"); localStorage.removeItem(LS_KEY+"__t"); }catch(e){ LS_AVAILABLE = false; }
+var memState = {};
+
+function lsRead(){
+  if(!LS_AVAILABLE) return memState;
+  try{ return JSON.parse(localStorage.getItem(LS_KEY) || "{}"); }catch(e){ return memState; }
+}
+function lsWrite(state){
+  if(LS_AVAILABLE){ try{ localStorage.setItem(LS_KEY, JSON.stringify(state)); }catch(e){ LS_AVAILABLE=false; memState=state; } }
+  else { memState = state; }
+  lsListeners.forEach(function(fn){ fn(); });
+}
+var lsListeners = [];
+
+var Store = {
+  async init(){
+    try{
+      if(window.claude && window.claude.use){
+        var d = await window.claude.use("db");
+        if(d){ dbNs = d; USE_DB = true; }
+      }
+    }catch(e){ USE_DB = false; }
+  },
+
+  onCargas(cb){
+    if(USE_DB){
+      return dbNs.collection("cargas").orderBy("creadoEn","desc").onSnapshot(function(snap){
+        cb(snap.docs.map(function(d){ return Object.assign({id:d.id}, d.data()); }));
+      }, function(){ cb([]); });
+    } else {
+      function push(){ var s=lsRead(); var list=Object.keys(s.cargas||{}).map(function(id){ return Object.assign({id:id}, s.cargas[id].meta); }); list.sort(function(a,b){ return (b.creadoEn||"").localeCompare(a.creadoEn||""); }); cb(list); }
+      lsListeners.push(push); push();
+      return function(){ lsListeners = lsListeners.filter(function(f){return f!==push;}); };
+    }
+  },
+
+  onItems(cargaId, cb){
+    if(USE_DB){
+      return dbNs.collection("cargas/"+cargaId+"/items").onSnapshot(function(snap){
+        cb(snap.docs.map(function(d){ return Object.assign({id:d.id}, d.data()); }));
+      }, function(){ cb([]); });
+    } else {
+      function push(){ var s=lsRead(); var c=(s.cargas||{})[cargaId]; var items=c?Object.keys(c.items||{}).map(function(id){ return Object.assign({id:id}, c.items[id]); }):[]; cb(items); }
+      lsListeners.push(push); push();
+      return function(){ lsListeners = lsListeners.filter(function(f){return f!==push;}); };
+    }
+  },
+
+  async createCarga(meta, items, explicitId){
+    var cargaId = explicitId || ("carga-" + uid());
+    meta = Object.assign({creadoEn: new Date().toISOString(), operarios:[]}, meta);
+    if(USE_DB){
+      await dbNs.doc("cargas/"+cargaId).set(meta);
+      for(var i=0;i<items.length;i++){
+        await dbNs.doc("cargas/"+cargaId+"/items/"+items[i].referencia).set(Object.assign({estado:"pendiente", asignadoA:null, registros:[]}, items[i]));
+      }
+    } else {
+      var s = lsRead(); s.cargas = s.cargas||{};
+      var itemsMap = {};
+      items.forEach(function(it){ itemsMap[it.referencia] = Object.assign({estado:"pendiente", asignadoA:null, registros:[]}, it); });
+      s.cargas[cargaId] = {meta: meta, items: itemsMap};
+      lsWrite(s);
+    }
+    return cargaId;
+  },
+
+  async deleteCarga(cargaId){
+    if(USE_DB){
+      var snap = await dbNs.collection("cargas/"+cargaId+"/items").get();
+      for(var i=0;i<snap.docs.length;i++){
+        await dbNs.doc("cargas/"+cargaId+"/items/"+snap.docs[i].id).delete();
+      }
+      await dbNs.doc("cargas/"+cargaId).delete();
+    } else {
+      var s = lsRead();
+      if(s.cargas) delete s.cargas[cargaId];
+      lsWrite(s);
+    }
+  },
+
+  async resetCarga(cargaId){
+    if(USE_DB){
+      var snap = await dbNs.collection("cargas/"+cargaId+"/items").get();
+      for(var i=0;i<snap.docs.length;i++){
+        await dbNs.doc("cargas/"+cargaId+"/items/"+snap.docs[i].id).update({estado:"pendiente", asignadoA:null, registros:[]});
+      }
+      await dbNs.doc("cargas/"+cargaId).update({operarios:[]});
+    } else {
+      var s = lsRead(); var c = s.cargas[cargaId]; if(!c) return;
+      Object.keys(c.items).forEach(function(ref){ c.items[ref].estado="pendiente"; c.items[ref].asignadoA=null; c.items[ref].registros=[]; });
+      c.meta.operarios = [];
+      lsWrite(s);
+    }
+  },
+
+  async assignItems(cargaId, itemIds, operario){
+    if(USE_DB){
+      for(var i=0;i<itemIds.length;i++){
+        await dbNs.doc("cargas/"+cargaId+"/items/"+itemIds[i]).update({asignadoA:operario});
+      }
+      var cdoc = await dbNs.doc("cargas/"+cargaId).get();
+      var ops = (cdoc.data()||{}).operarios || [];
+      if(ops.indexOf(operario)===-1){ ops = ops.concat([operario]); await dbNs.doc("cargas/"+cargaId).update({operarios:ops}); }
+    } else {
+      var s = lsRead(); var c = s.cargas[cargaId];
+      itemIds.forEach(function(id){ if(c.items[id]) c.items[id].asignadoA = operario; });
+      c.meta.operarios = c.meta.operarios || [];
+      if(c.meta.operarios.indexOf(operario)===-1) c.meta.operarios.push(operario);
+      lsWrite(s);
+    }
+  },
+
+  async addRegistro(cargaId, itemId, registro){
+    if(USE_DB){
+      var doc = await dbNs.doc("cargas/"+cargaId+"/items/"+itemId).get();
+      var data = doc.data() || {};
+      var regs = (data.registros||[]).concat([registro]);
+      await dbNs.doc("cargas/"+cargaId+"/items/"+itemId).update({registros:regs, estado:"en_progreso"});
+    } else {
+      var s = lsRead(); var it = s.cargas[cargaId].items[itemId];
+      it.registros = (it.registros||[]).concat([registro]);
+      it.estado = "en_progreso";
+      lsWrite(s);
+    }
+  },
+
+  async removeRegistro(cargaId, itemId, idx){
+    if(USE_DB){
+      var doc = await dbNs.doc("cargas/"+cargaId+"/items/"+itemId).get();
+      var data = doc.data() || {};
+      var regs = (data.registros||[]).slice(); regs.splice(idx,1);
+      await dbNs.doc("cargas/"+cargaId+"/items/"+itemId).update({registros:regs, estado: regs.length?"en_progreso":"pendiente"});
+    } else {
+      var s = lsRead(); var it = s.cargas[cargaId].items[itemId];
+      it.registros.splice(idx,1);
+      it.estado = it.registros.length?"en_progreso":"pendiente";
+      lsWrite(s);
+    }
+  },
+
+  async finalizarItem(cargaId, itemId){
+    if(USE_DB){ await dbNs.doc("cargas/"+cargaId+"/items/"+itemId).update({estado:"finalizado"}); }
+    else { var s=lsRead(); s.cargas[cargaId].items[itemId].estado="finalizado"; lsWrite(s); }
+  },
+
+  onUsuarios(cb){
+    if(USE_DB){
+      return dbNs.collection("usuarios").onSnapshot(function(snap){
+        cb(snap.docs.map(function(d){ return Object.assign({id:d.id}, d.data()); }));
+      }, function(){ cb([]); });
+    } else {
+      function push(){ var s=lsRead(); var list=Object.keys(s.usuarios||{}).map(function(id){ return Object.assign({id:id}, s.usuarios[id]); }); cb(list); }
+      lsListeners.push(push); push();
+      return function(){ lsListeners = lsListeners.filter(function(f){return f!==push;}); };
+    }
+  },
+
+  async upsertUsuario(email, data){
+    var id = email.toLowerCase().trim();
+    var body = Object.assign({email:id, activo:true, actualizadoEn:new Date().toISOString()}, data);
+    if(USE_DB){
+      await dbNs.doc("usuarios/"+id).set(body);
+    } else {
+      var s = lsRead(); s.usuarios = s.usuarios||{};
+      s.usuarios[id] = Object.assign({}, s.usuarios[id], body);
+      lsWrite(s);
+    }
+  },
+
+  async setUsuarioActivo(email, activo){
+    var id = email.toLowerCase().trim();
+    if(USE_DB){ await dbNs.doc("usuarios/"+id).update({activo:activo}); }
+    else { var s=lsRead(); if(s.usuarios && s.usuarios[id]){ s.usuarios[id].activo = activo; lsWrite(s); } }
+  },
+
+  async deleteUsuario(email){
+    var id = email.toLowerCase().trim();
+    if(USE_DB){ await dbNs.doc("usuarios/"+id).delete(); }
+    else { var s=lsRead(); if(s.usuarios) delete s.usuarios[id]; lsWrite(s); }
+  }
+};
+
+/* ================= theme (defaults to light, ignores OS/browser dark
+   mode preference — the app decides its own look; the toggle lets a
+   viewer opt into dark manually, remembered on this device) ========== */
+var THEME_KEY = "semaforos_theme_v1";
+function getTheme(){ try{ return localStorage.getItem(THEME_KEY) || "light"; }catch(e){ return "light"; } }
+function setTheme(t){
+  try{ localStorage.setItem(THEME_KEY, t); }catch(e){}
+  document.documentElement.setAttribute("data-theme", t);
+}
+function toggleTheme(){ setTheme(getTheme()==="dark" ? "light" : "dark"); render(); }
+setTheme(getTheme());
+
+/* ================= identity (simulated M365 login) =================
+   Uses sessionStorage (per-tab), not localStorage (shared by every tab of
+   this origin) — so each browser tab can be logged in as a different
+   role/user at the same time, e.g. one tab as coordinador and another as
+   operario, without one login overwriting the other. The trade-off: the
+   identity is forgotten when that tab is closed, not remembered forever. */
+var IDENTITY_KEY = "semaforos_identity_v1";
+var memIdentity = null;
+function getIdentity(){ try{ return JSON.parse(sessionStorage.getItem(IDENTITY_KEY)); }catch(e){ return memIdentity; } }
+function setIdentity(v){ memIdentity = v; try{ sessionStorage.setItem(IDENTITY_KEY, JSON.stringify(v)); }catch(e){} }
+function clearIdentity(){ memIdentity = null; try{ sessionStorage.removeItem(IDENTITY_KEY); }catch(e){} }
+
+/* ================= app state ================= */
+var state = {
+  identity: getIdentity(),
+  usuarios: [],
+  cargas: [],
+  currentCargaId: null,
+  items: [],
+  unsubItems: null,
+  view: "list", // coordinador: list | detail ; operario: home | scan | search | entry
+  scanning: false,
+  activeItemId: null,
+  selectedIds: {},
+  operarioInput: "",
+  filterEstado: "todos",
+  filterGrupo: "todos"
+};
+
+var root = document.getElementById("app");
+
+function setState(patch){ Object.assign(state, patch); render(); }
+
+/* ================= identity screen ================= */
+function renderLogin(){
+  var role = state._loginRole || null;
+  var activos = (state.usuarios||[]).filter(function(u){ return u.activo!==false; })
+    .sort(function(a,b){ return String(a.nombre||a.email).localeCompare(String(b.nombre||b.email)); });
+  var esRegistrado = activos.some(function(u){ return u.email===state._loginEmail; });
+  var selValue = esRegistrado ? state._loginEmail : (state._loginOtro ? "__otro__" : "");
+  var mostrarInput = !activos.length || selValue==="__otro__";
+  root.innerHTML =
+  '<div class="login-shell"><div class="login-card card" style="position:relative;">'+
+    '<button id="themeToggle" title="Cambiar apariencia" style="position:absolute;top:20px;right:20px;">'+(getTheme()==="dark"?"☀️":"🌙")+'</button>'+
+    '<div class="mark-big">'+iconSemaforo()+'</div>'+
+    '<div style="margin-bottom:8px;">'+renderSyncBadge()+'</div>'+
+    '<p class="eyebrow">Prototipo · acceso simulado M365</p>'+
+    '<h1 style="font-size:24px;margin-bottom:6px;">Semáforos de Vencimiento</h1>'+
+    '<p class="hint" style="margin-bottom:18px;">Ingresa con tu correo corporativo. En este prototipo el inicio de sesión de Microsoft 365 se simula con tu correo; en producción se validaría con Azure AD.</p>'+
+    '<div class="field"><label>Correo corporativo</label>'+
+      (activos.length?'<select id="loginSel"><option value="">Selecciona tu correo…</option>'+
+        activos.map(function(u){ return '<option value="'+esc(u.email)+'"'+(selValue===u.email?" selected":"")+'>'+esc((u.nombre?u.nombre+" — ":"")+u.email)+'</option>'; }).join("")+
+        '<option value="__otro__"'+(selValue==="__otro__"?" selected":"")+'>Escribir otro correo…</option></select>':'')+
+      (mostrarInput?'<input id="loginEmail" placeholder="nombre.apellido@ejemplo.com" value="'+esc(state._loginEmail||"")+'"'+(activos.length?' style="margin-top:8px;"':'')+'>':'')+
+    '</div>'+
+    '<div class="field"><label>Ingresas como</label>'+
+      '<div class="role-choice">'+
+        '<div class="role-btn '+(role==="coordinador"?"sel":"")+'" data-role="coordinador"><b>Coordinador</b><span>Carga y asigna</span></div>'+
+        '<div class="role-btn '+(role==="operario"?"sel":"")+'" data-role="operario"><b>Operario</b><span>Cuenta y registra</span></div>'+
+        '<div class="role-btn '+(role==="administrador"?"sel":"")+'" data-role="administrador"><b>Admin</b><span>Gestiona usuarios</span></div>'+
+      '</div>'+
+      '<p class="hint">Coordinador y Operario siguen abiertos para cualquiera mientras terminamos de definir permisos. Admin sí valida: el primero en entrar como Admin queda registrado automáticamente; los siguientes deben ser agregados por un administrador ya existente.</p>'+
+    '</div>'+
+    '<button class="btn primary block" id="loginGo">Ingresar</button>'+
+  '</div></div>';
+
+  root.querySelectorAll(".role-btn").forEach(function(b){
+    b.onclick = function(){ state._loginRole = b.getAttribute("data-role"); render(); };
+  });
+  root.querySelector("#themeToggle").onclick = toggleTheme;
+  var selEl = root.querySelector("#loginSel");
+  if(selEl) selEl.onchange = function(){
+    var v = selEl.value;
+    if(v==="__otro__"){ state._loginOtro = true; state._loginEmail = ""; }
+    else {
+      state._loginOtro = false; state._loginEmail = v;
+      var u = activos.find(function(x){ return x.email===v; });
+      if(u) state._loginRole = u.rol;
+    }
+    render();
+  };
+  root.querySelector("#loginGo").onclick = async function(){
+    var inp = root.querySelector("#loginEmail");
+    var email = (inp ? inp.value : (state._loginEmail||"")).trim();
+    if(!email || !state._loginRole){ await notify("Escribe tu correo corporativo y elige un rol."); return; }
+    var emailKey = email.toLowerCase();
+    var registrado = (state.usuarios||[]).find(function(u){ return u.email===emailKey; });
+    var rolFinal = state._loginRole;
+
+    if(registrado){
+      if(registrado.activo===false){ await notify("Tu cuenta fue desactivada por un administrador de la app. Contáctalo si crees que es un error."); return; }
+      rolFinal = registrado.rol;
+    } else if(state._loginRole==="administrador"){
+      var hayAdminActivo = (state.usuarios||[]).some(function(u){ return u.rol==="administrador" && u.activo!==false; });
+      if(!hayAdminActivo){
+        await Store.upsertUsuario(emailKey, {nombre:deriveNombreFromEmail(emailKey), rol:"administrador", activo:true});
+      } else {
+        await notify('Tu correo no está registrado como administrador. Pide a un administrador existente que te agregue desde el "Panel de administración".');
+        return;
+      }
+    }
+
+    var nombreFinal = registrado&&registrado.nombre ? registrado.nombre : deriveNombreFromEmail(emailKey);
+    var identity = {nombre:nombreFinal, email:emailKey, rol:rolFinal};
+    setIdentity(identity);
+    setState({identity:identity, view: rolFinal==="operario"?"home":"list"});
+  };
+  var emailEl = root.querySelector("#loginEmail");
+  if(emailEl) emailEl.oninput = function(e){ state._loginEmail = e.target.value; };
+}
+
+/* ================= topbar ================= */
+function renderSyncBadge(){
+  if(state.syncMode==="db"){
+    return '<span class="pill green dot" title="Los datos se comparten en tiempo real entre todos los dispositivos.">Sincronizado</span>';
+  }
+  if(state.syncMode==="local"){
+    return '<span class="pill amber dot" title="No se pudo conectar a la base compartida. Los datos solo quedan en este dispositivo/navegador — otros dispositivos no los verán. Intenta recargar la página.">Local (sin sincronizar)</span>';
+  }
+  return '<span class="pill neutral dot" title="Conectando...">Conectando…</span>';
+}
+function renderTopbar(){
+  return '<div class="topbar">'+
+    '<div class="brand"><div class="mark">'+iconSemaforo()+'</div><div><b>Semáforos</b><div class="sub">PROTOTIPO · DATOS DE PRUEBA</div></div></div>'+
+    '<div class="who">'+renderSyncBadge()+'<span>'+({administrador:"Administrador",coordinador:"Coordinador",operario:"Operario"}[state.identity.rol]||state.identity.rol)+' — <span class="name">'+esc(state.identity.nombre)+'</span></span>'+
+      '<button id="themeToggle" title="Cambiar apariencia">'+(getTheme()==="dark"?"☀️":"🌙")+'</button>'+
+      '<button id="logoutBtn">Salir</button></div>'+
+  '</div>';
+}
+function wireTopbar(){
+  var b = root.querySelector("#logoutBtn");
+  if(b) b.onclick = function(){
+    clearIdentity();
+    state._loginEmail = ""; state._loginRole = null; state._loginOtro = false;
+    if(state.unsubItems) state.unsubItems();
+    setState({identity:null, currentCargaId:null, items:[], unsubItems:null, view:"list"});
+  };
+  var t = root.querySelector("#themeToggle");
+  if(t) t.onclick = toggleTheme;
+}
+
+/* ================= administrador: gestión de usuarios ================= */
+var ROL_LABEL = {administrador:"Administrador", coordinador:"Coordinador", operario:"Operario"};
+function renderAdminPanel(){
+  var usuarios = state.usuarios||[];
+  var html = renderTopbar() + '<div class="wrap">';
+  html += '<p class="eyebrow">Panel de administración</p><h1 style="font-size:22px;margin-bottom:16px;">Gestión de usuarios</h1>';
+
+  html += '<div class="grid-stats">'+
+    '<div class="stat"><div class="n">'+usuarios.length+'</div><div class="l">Usuarios registrados</div></div>'+
+    '<div class="stat"><div class="n">'+usuarios.filter(function(u){return u.activo!==false;}).length+'</div><div class="l">Activos</div></div>'+
+    '<div class="stat"><div class="n">'+usuarios.filter(function(u){return u.rol==="administrador";}).length+'</div><div class="l">Administradores</div></div>'+
+  '</div>';
+
+  var editing = state._admEditing ? usuarios.find(function(u){ return u.email===state._admEditing; }) : null;
+  html += '<div class="card" style="margin-bottom:16px;">'+
+    '<h3 style="font-size:15px;margin-bottom:12px;">'+(editing?"Editar usuario":"Agregar usuario")+'</h3>'+
+    '<div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;">'+
+      '<div class="field" style="flex:1;min-width:160px;margin-bottom:0;"><label>Nombre</label><input id="admNombre" placeholder="Nombre completo" value="'+esc(editing?editing.nombre:"")+'"></div>'+
+      '<div class="field" style="flex:1;min-width:200px;margin-bottom:0;"><label>Correo corporativo</label><input id="admEmail" placeholder="nombre.apellido@ejemplo.com" value="'+esc(editing?editing.email:"")+'" '+(editing?"disabled":"")+'></div>'+
+      '<div class="field" style="min-width:160px;margin-bottom:0;"><label>Rol</label><select id="admRol">'+
+        '<option value="operario"'+(editing&&editing.rol==="operario"?" selected":"")+'>Operario</option>'+
+        '<option value="coordinador"'+(editing&&editing.rol==="coordinador"?" selected":"")+'>Coordinador</option>'+
+        '<option value="administrador"'+(editing&&editing.rol==="administrador"?" selected":"")+'>Administrador</option>'+
+      '</select></div>'+
+      '<button class="btn primary" id="admGuardar">'+(editing?"Actualizar":"Guardar")+'</button>'+
+      (editing?'<button class="btn" id="admCancelar">Cancelar</button>':"")+
+    '</div>'+
+    '<p class="hint" style="margin-top:8px;">'+(editing?'Editando "'+esc(editing.email)+'". El correo no se puede cambiar porque identifica al usuario.':'Si el correo ya existe, esto actualiza su nombre y su rol en vez de crear un usuario duplicado.')+'</p>'+
+  '</div>';
+
+  html += '<div class="card" style="padding:0;"><div class="tablewrap"><table><thead><tr>'+
+    '<th>Nombre</th><th>Correo</th><th>Rol</th><th>Estado</th><th></th>'+
+  '</tr></thead><tbody>';
+  if(!usuarios.length){
+    html += '<tr><td colspan="5" style="text-align:center;color:var(--muted);padding:24px;">Aún no hay usuarios registrados — el primer administrador se crea automáticamente al ingresar por primera vez con el rol "Admin".</td></tr>';
+  }
+  usuarios.forEach(function(u){
+    var activo = u.activo!==false;
+    html += '<tr>'+
+      '<td>'+esc(u.nombre||"—")+(u.email===state.identity.email?' <span class="hint">(tú)</span>':"")+'</td>'+
+      '<td class="mono">'+esc(u.email)+'</td>'+
+      '<td>'+esc(ROL_LABEL[u.rol]||u.rol)+'</td>'+
+      '<td>'+(activo?'<span class="pill green dot">Activo</span>':'<span class="pill neutral dot">Inactivo</span>')+'</td>'+
+      '<td style="white-space:nowrap;">'+
+        '<button class="btn sm" data-edit="'+esc(u.email)+'">Editar</button> '+
+        '<button class="btn sm" data-toggle="'+esc(u.email)+'" data-activo="'+activo+'">'+(activo?"Desactivar":"Activar")+'</button> '+
+        '<button class="btn sm danger" data-del="'+esc(u.email)+'">Eliminar</button>'+
+      '</td>'+
+    '</tr>';
+  });
+  html += '</tbody></table></div></div>';
+  html += '</div>';
+  root.innerHTML = html;
+  wireTopbar();
+
+  root.querySelector("#admGuardar").onclick = async function(){
+    var nombre = root.querySelector("#admNombre").value.trim();
+    var email = (editing?editing.email:root.querySelector("#admEmail").value.trim().toLowerCase());
+    var rol = root.querySelector("#admRol").value;
+    if(!nombre || !email){ await notify("Escribe nombre y correo."); return; }
+    try{
+      await Store.upsertUsuario(email, {nombre:nombre, rol:rol, activo: editing?editing.activo!==false:true});
+      state._admEditing = null;
+      render();
+    }catch(err){
+      await notify("No se pudo guardar el usuario: "+(err&&err.message?err.message:err));
+    }
+  };
+  if(editing){
+    root.querySelector("#admCancelar").onclick = function(){ state._admEditing = null; render(); };
+  }
+  root.querySelectorAll("[data-edit]").forEach(function(b){
+    b.onclick = function(){ state._admEditing = b.getAttribute("data-edit"); render(); };
+  });
+  root.querySelectorAll("[data-toggle]").forEach(function(b){
+    b.onclick = async function(){
+      var email = b.getAttribute("data-toggle");
+      var activo = b.getAttribute("data-activo")==="true";
+      if(email===state.identity.email && activo){ await notify("No puedes desactivar tu propia cuenta desde aquí."); return; }
+      try{
+        await Store.setUsuarioActivo(email, !activo);
+        render();
+      }catch(err){
+        await notify("No se pudo cambiar el estado del usuario: "+(err&&err.message?err.message:err));
+      }
+    };
+  });
+  root.querySelectorAll("[data-del]").forEach(function(b){
+    b.onclick = async function(){
+      var email = b.getAttribute("data-del");
+      if(email===state.identity.email){ await notify("No puedes eliminar tu propia cuenta."); return; }
+      var ok = await askConfirm('¿Eliminar el usuario "'+email+'"? Esto no borra las cargas o registros que haya hecho, solo su acceso.');
+      if(ok){
+        try{
+          await Store.deleteUsuario(email);
+          render();
+        }catch(err){
+          await notify("No se pudo eliminar el usuario: "+(err&&err.message?err.message:err));
+        }
+      }
+    };
+  });
+}
+
+/* ================= coordinador: cargas list ================= */
+function renderCoordinadorList(){
+  var html = renderTopbar() + '<div class="wrap">';
+  html += '<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:16px;flex-wrap:wrap;">'+
+    '<div><p class="eyebrow">Cargas de referencias</p><h1 style="font-size:22px;">Selecciona o crea una carga</h1></div>'+
+    '<div style="display:flex;gap:8px;">'+
+      '<button class="btn primary" id="btnUpload">Cargar archivo Excel</button>'+
+    '</div>'+
+  '</div>';
+
+  if(!state.cargas.length){
+    html += '<div class="card empty">Aún no hay cargas. Usa "Cargar archivo Excel" para crear una con tu archivo exportado de SIESA.</div>';
+  } else {
+    html += '<div class="card" style="padding:0;overflow:hidden;">';
+    state.cargas.forEach(function(c, idx){
+      html += '<div class="carga-row" data-id="'+c.id+'" style="display:flex;align-items:center;justify-content:space-between;gap:12px;padding:16px 20px;cursor:pointer;'+(idx? 'border-top:1px solid var(--border);':'')+'">'+
+        '<div><div style="font-weight:600;">'+esc(c.bodegaDesc||"Carga")+' <span class="pill neutral" style="margin-left:6px;">'+esc(c.bodega||"")+'</span></div>'+
+        '<div class="hint">Creada por '+esc(c.creadoPor||"—")+' · '+(c.creadoEn?new Date(c.creadoEn).toLocaleString("es-CO"):"")+' · '+(c.totalItems||0)+' referencias</div></div>'+
+        '<div style="display:flex;gap:8px;flex:0 0 auto;">'+
+          '<button class="btn sm" data-open="'+c.id+'">Abrir →</button>'+
+          '<button class="btn sm danger" data-del="'+c.id+'" title="Eliminar carga">🗑</button>'+
+        '</div>'+
+      '</div>';
+    });
+    html += '</div>';
+  }
+  html += '<p class="footer-note">Acceso desde dispositivo del operario: comparte esta misma URL o el código QR desde dentro de una carga.</p>';
+  html += '</div>';
+  root.innerHTML = html;
+  wireTopbar();
+
+  root.querySelectorAll(".carga-row").forEach(function(r){
+    r.onclick = function(e){ if(e.target.closest("[data-del]")) return; openCarga(r.getAttribute("data-id")); };
+  });
+  root.querySelectorAll("[data-del]").forEach(function(b){
+    b.onclick = async function(e){
+      e.stopPropagation();
+      var id = b.getAttribute("data-del");
+      var c = state.cargas.find(function(x){return x.id===id;});
+      var ok = await askConfirm('¿Eliminar la carga "'+(c?c.bodegaDesc:id)+'"? Se borrarán sus referencias, asignaciones y registros capturados. Esta acción no se puede deshacer.');
+      if(ok){
+        await Store.deleteCarga(id);
+      }
+    };
+  });
+  root.querySelector("#btnUpload").onclick = function(){ showUploadModal(); };
+}
+
+function showUploadModal(){
+  var m = document.createElement("div");
+  m.className = "modal-bg";
+  m.innerHTML = '<div class="modal">'+
+    '<div class="modal-head"><h2 style="font-size:17px;">Cargar archivo de SIESA</h2><button id="mClose">×</button></div>'+
+    '<p class="hint" style="margin-bottom:12px;">Selecciona el Excel exportado de SIESA (opción "cantidades en unidades de empaque"). Se leen las columnas: Bodega, Desc. bodega, Referencia, Desc. item, U.M., Factor U.M., Existencia, GRUPO SHOPPER, LINEA PROVEEDOR, MARCA, Código barra principal, Costo prom. unit./tot., Calidad Perecedero. Si el archivo trae una columna opcional <b>"Asignar a"</b> diligenciada con el <b>correo</b> del operario, esa asignación se precarga automáticamente (igual podrás ajustarla luego).</p>'+
+    '<div class="field"><input type="file" id="fileInput" accept=".xlsx,.xls"></div>'+
+    '<div class="field" id="fileStatus" style="font-size:13px;color:var(--muted);"></div>'+
+    '<button class="btn primary block" id="mConfirm" disabled>Crear carga</button>'+
+  '</div>';
+  document.body.appendChild(m);
+  var parsed = null;
+  m.querySelector("#mClose").onclick = function(){ m.remove(); };
+  m.onclick = function(e){ if(e.target===m) m.remove(); };
+  m.querySelector("#fileInput").onchange = function(e){
+    var f = e.target.files[0]; if(!f) return;
+    var status = m.querySelector("#fileStatus");
+    status.textContent = "Leyendo archivo...";
+    var reader = new FileReader();
+    reader.onload = function(ev){
+      try{
+        var wb = XLSX.read(ev.target.result, {type:"array"});
+        var ws = wb.Sheets[wb.SheetNames[0]];
+        var rows = XLSX.utils.sheet_to_json(ws, {defval:""});
+        var mapped = rows.map(function(r){
+          return {
+            referencia: String(r["Referencia"]||"").trim(),
+            descItem: String(r["Desc. item"]||"").trim(),
+            barcode: String(r["Código barra principal"]||"").trim(),
+            um: String(r["U.M."]||"").trim(),
+            factorUM: Number(r["Factor U.M."])||1,
+            existenciaUM: Number(r["Existencia"])||0,
+            grupoShopper: String(r["GRUPO SHOPPER"]||"").trim(),
+            lineaProveedor: String(r["LINEA PROVEEDOR"]||"").trim(),
+            marca: String(r["MARCA"]||"").trim(),
+            costoUnit: Number(r["Costo prom. unit. (ins)"])||0,
+            costoTotUM: Number(r["Costo prom. tot. (ins)"])||0,
+            perecedero: String(r["Calidad Perecedero"]||"").trim().toLowerCase(),
+            bodega: String(r["Bodega"]||"").trim(),
+            bodegaDesc: String(r["Desc. bodega"]||"").trim(),
+            asignadoA: String(r["Asignar a"]||"").trim().toLowerCase() || null
+          };
+        }).filter(function(x){ return x.referencia && x.perecedero==="si"; });
+        if(!mapped.length){ status.innerHTML = '<span style="color:var(--danger);">No se encontraron filas con Calidad Perecedero = "si". Revisa el archivo.</span>'; return; }
+        parsed = mapped;
+        var yaAsignadas = mapped.filter(function(x){ return x.asignadoA; });
+        var operariosDetectados = Array.from(new Set(yaAsignadas.map(function(x){ return x.asignadoA; })));
+        var msg = 'Listo: <b>'+mapped.length+'</b> referencias perecederas en bodega <b>'+esc(mapped[0].bodega)+' - '+esc(mapped[0].bodegaDesc)+'</b>.';
+        if(operariosDetectados.length){
+          msg += '<br>La columna "Asignar a" ya trae <b>'+yaAsignadas.length+'</b> de '+mapped.length+' referencias repartidas entre: <b>'+operariosDetectados.map(function(e){return esc(nombrePorEmail(e))+' ('+esc(e)+')';}).join(", ")+'</b>. Podrás ajustarlo después de crear la carga.';
+        }
+        status.innerHTML = msg;
+        m.querySelector("#mConfirm").disabled = false;
+      }catch(err){
+        status.innerHTML = '<span style="color:var(--danger);">No se pudo leer el archivo: '+esc(err.message||err)+'</span>';
+      }
+    };
+    reader.readAsArrayBuffer(f);
+  };
+  m.querySelector("#mConfirm").onclick = async function(){
+    if(!parsed) return;
+    var operariosDesdeArchivo = Array.from(new Set(parsed.filter(function(x){return x.asignadoA;}).map(function(x){return x.asignadoA;})));
+    var meta = {bodega:parsed[0].bodega, bodegaDesc:parsed[0].bodegaDesc, creadoPor:state.identity.nombre, totalItems:parsed.length, operarios:operariosDesdeArchivo};
+    var id = await Store.createCarga(meta, parsed);
+    m.remove();
+    openCarga(id);
+  };
+}
+
+function openCarga(id){
+  if(state.unsubItems) state.unsubItems();
+  var unsub = Store.onItems(id, function(items){ setState({items:items}); });
+  setState({currentCargaId:id, view:"detail", unsubItems:unsub, selectedIds:{}});
+}
+
+/* ================= coordinador: carga detail ================= */
+function renderCoordinadorDetail(){
+  var carga = state.cargas.find(function(c){return c.id===state.currentCargaId;}) || {};
+  var items = state.items;
+  var operarios = carga.operarios || [];
+
+  var pend = items.filter(function(i){return i.estado==="pendiente";}).length;
+  var prog = items.filter(function(i){return i.estado==="en_progreso";}).length;
+  var fin = items.filter(function(i){return i.estado==="finalizado";}).length;
+  var sinAsignar = items.filter(function(i){return !i.asignadoA;}).length;
+
+  var html = renderTopbar() + '<div class="wrap">';
+  html += '<button class="btn ghost sm" id="backBtn" style="margin-bottom:10px;">← Todas las cargas</button>';
+  html += '<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:16px;">'+
+    '<div><p class="eyebrow">'+esc(carga.bodega||"")+'</p><h1 style="font-size:22px;">'+esc(carga.bodegaDesc||"Carga")+'</h1></div>'+
+    '<div style="display:flex;gap:8px;">'+
+      '<button class="btn sm" id="btnQr">Código QR de acceso</button>'+
+      '<button class="btn sm danger" id="btnReset">Reiniciar</button>'+
+      '<button class="btn sm danger" id="btnDeleteCarga">🗑 Eliminar carga</button>'+
+    '</div>'+
+  '</div>';
+
+  html += '<div class="grid-stats">'+
+    '<div class="stat"><div class="n">'+items.length+'</div><div class="l">Referencias totales</div></div>'+
+    '<div class="stat"><div class="n">'+sinAsignar+'</div><div class="l">Sin asignar</div></div>'+
+    '<div class="stat"><div class="n">'+prog+'</div><div class="l">En progreso</div></div>'+
+    '<div class="stat"><div class="n">'+fin+'</div><div class="l">Finalizadas</div></div>'+
+  '</div>';
+
+  html += '<div class="tabs">'+
+    '<button data-tab="asignar" class="'+(!state._tab||state._tab==="asignar"?"active":"")+'">Asignación y avance</button>'+
+    '<button data-tab="cruce" class="'+(state._tab==="cruce"?"active":"")+'">Cruce de cantidades</button>'+
+    '<button data-tab="indicadores" class="'+(state._tab==="indicadores"?"active":"")+'">Semáforo de vencimiento</button>'+
+  '</div>';
+
+  if(state._tab==="cruce"){
+    html += renderCruceTab(items);
+  } else if(state._tab==="indicadores"){
+    html += renderIndicadoresTab(items);
+  } else {
+    html += renderAsignarTab(items, operarios);
+  }
+
+  html += '</div>';
+  root.innerHTML = html;
+  wireTopbar();
+
+  root.querySelector("#backBtn").onclick = function(){
+    if(state.unsubItems) state.unsubItems();
+    setState({view:"list", currentCargaId:null, items:[], unsubItems:null});
+  };
+  root.querySelector("#btnReset").onclick = async function(){
+    var ok = await askConfirm("¿Reiniciar esta carga? Se borrarán asignaciones y registros capturados.");
+    if(ok){
+      await Store.resetCarga(state.currentCargaId); render();
+    }
+  };
+  root.querySelector("#btnDeleteCarga").onclick = async function(){
+    var ok = await askConfirm('¿Eliminar la carga "'+esc(carga.bodegaDesc||"")+'" por completo? Se borrarán sus referencias, asignaciones y registros. Esta acción no se puede deshacer.');
+    if(ok){
+      var id = state.currentCargaId;
+      if(state.unsubItems) state.unsubItems();
+      setState({view:"list", currentCargaId:null, items:[], unsubItems:null});
+      await Store.deleteCarga(id);
+    }
+  };
+  root.querySelector("#btnQr").onclick = showQrModal;
+  root.querySelectorAll(".tabs button").forEach(function(b){ b.onclick = function(){ state._tab = b.getAttribute("data-tab"); render(); }; });
+
+  wireAsignarTab();
+  wireIndicadoresTab();
+}
+
+function renderAsignarTab(items, operarios){
+  var operariosRegistrados = (state.usuarios||[]).filter(function(u){ return u.rol==="operario" && u.activo!==false; }).map(function(u){ return u.email; });
+  var opciones = Array.from(new Set(operariosRegistrados.concat(operarios||[])));
+  var html = '<div class="card" style="margin-bottom:14px;">'+
+    '<div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;">'+
+      '<div class="field" style="flex:1;min-width:180px;margin-bottom:0;"><label>Asignar seleccionadas a (correo)</label>'+
+        '<input id="opInput" list="opList" placeholder="correo.operario@ejemplo.com" value="'+esc(state.operarioInput||"")+'">'+
+        '<datalist id="opList">'+opciones.map(function(o){return '<option value="'+esc(o)+'">'+esc(nombrePorEmail(o))+'</option>';}).join("")+'</datalist>'+
+        (opciones.length?'':'<p class="hint">Aún no hay operarios registrados en el "Panel de administración". Puedes escribir el correo igual, pero se recomienda registrarlos primero.</p>')+
+      '</div>'+
+      '<button class="btn primary" id="btnAssign">Asignar</button>'+
+      '<button class="btn" id="btnAutoAssign">Repartir equitativo</button>'+
+    '</div>'+
+  '</div>';
+
+  html += '<div class="card" style="padding:0;">'+
+    '<div class="tablewrap"><table><thead><tr>'+
+      '<th></th><th>Referencia</th><th>Descripción</th><th>Grupo Shopper</th><th>Asignado a</th><th>Estado</th><th>Lotes</th>'+
+    '</tr></thead><tbody>';
+  items.forEach(function(it){
+    var estPill = it.estado==="finalizado" ? '<span class="pill green dot">Finalizado</span>' : it.estado==="en_progreso" ? '<span class="pill amber dot">En progreso</span>' : '<span class="pill neutral dot">Pendiente</span>';
+    html += '<tr>'+
+      '<td><input type="checkbox" class="rowchk" data-id="'+it.id+'" '+(state.selectedIds[it.id]?"checked":"")+'></td>'+
+      '<td class="mono">'+esc(it.referencia)+'</td>'+
+      '<td>'+esc(it.descItem)+'</td>'+
+      '<td style="max-width:180px;">'+esc((it.grupoShopper||"").split(" - ")[1]||it.grupoShopper||"")+'</td>'+
+      '<td>'+(it.asignadoA?(esc(nombrePorEmail(it.asignadoA))+'<div class="hint mono" style="font-size:11px;">'+esc(it.asignadoA)+'</div>'):'<span class="hint">sin asignar</span>')+'</td>'+
+      '<td>'+estPill+'</td>'+
+      '<td class="num">'+(it.registros?it.registros.length:0)+'</td>'+
+    '</tr>';
+  });
+  html += '</tbody></table></div></div>';
+  return html;
+}
+
+function wireAsignarTab(){
+  var opInputEl = root.querySelector("#opInput");
+  if(!opInputEl) return;
+  opInputEl.oninput = function(e){ state.operarioInput = e.target.value; };
+  root.querySelectorAll(".rowchk").forEach(function(c){
+    c.onchange = function(){ state.selectedIds[c.getAttribute("data-id")] = c.checked; };
+  });
+  root.querySelector("#btnAssign").onclick = async function(){
+    var ids = Object.keys(state.selectedIds).filter(function(k){return state.selectedIds[k];});
+    var op = (state.operarioInput||"").trim().toLowerCase();
+    if(!ids.length){ await notify("Selecciona al menos una referencia."); return; }
+    if(!op){ await notify("Escribe el correo del operario."); return; }
+    await Store.assignItems(state.currentCargaId, ids, op);
+    state.selectedIds = {}; state.operarioInput = ""; render();
+  };
+  root.querySelector("#btnAutoAssign").onclick = async function(){
+    var n = await askPrompt("¿Entre cuántos operarios se reparte?", "2");
+    n = parseInt(n,10);
+    if(!n || n<1) return;
+    var names = [];
+    for(var i=1;i<=n;i++){ var nm = await askPrompt("Correo del operario "+i); if(nm) names.push(nm.trim().toLowerCase()); }
+    if(!names.length) return;
+    var unassigned = state.items.filter(function(it){return !it.asignadoA;}).map(function(it){return it.id;});
+    var perOp = Math.ceil(unassigned.length/names.length);
+    for(var j=0;j<names.length;j++){
+      var slice = unassigned.slice(j*perOp,(j+1)*perOp);
+      if(slice.length) await Store.assignItems(state.currentCargaId, slice, names[j]);
+    }
+    render();
+  };
+}
+
+function renderCruceTab(items){
+  var html = '<div class="banner">Cruce automático: existencia de sistema (convertida de unidades de empaque a unidades con el Factor U.M.) vs. suma de cantidades físicas registradas por el operario. RN-07 / RF-13.</div>';
+  html += '<div class="card" style="padding:0;"><div class="tablewrap"><table><thead><tr>'+
+    '<th>Referencia</th><th>Descripción</th><th>U.M. / Factor</th><th>Existencia sistema (und)</th><th>Físico contado (und)</th><th>Diferencia</th><th>Semáforo</th>'+
+  '</tr></thead><tbody>';
+  items.forEach(function(it){
+    var sisUnid = (it.existenciaUM||0) * (it.factorUM||1);
+    var fisico = (it.registros||[]).reduce(function(s,r){ return s + (Number(r.cantidad)||0); }, 0);
+    var diff = fisico - sisUnid;
+    var pct = sisUnid ? Math.abs(diff)/sisUnid : (fisico?1:0);
+    var estado = (!it.registros || !it.registros.length) ? {cls:"neutral",txt:"Sin contar"} : pct<=0.02 ? {cls:"green",txt:"Cuadra"} : pct<=0.10 ? {cls:"amber",txt:"Diferencia leve"} : {cls:"red",txt:"Diferencia alta"};
+    html += '<tr>'+
+      '<td class="mono">'+esc(it.referencia)+'</td>'+
+      '<td>'+esc(it.descItem)+'</td>'+
+      '<td class="mono">'+esc(it.um)+' / ×'+it.factorUM+'</td>'+
+      '<td class="num">'+fmtNum(sisUnid,1)+'</td>'+
+      '<td class="num">'+((it.registros&&it.registros.length)?fmtNum(fisico,1):"—")+'</td>'+
+      '<td class="num">'+((it.registros&&it.registros.length)?(diff>=0?"+":"")+fmtNum(diff,1):"—")+'</td>'+
+      '<td><span class="pill '+estado.cls+' dot">'+estado.txt+'</span></td>'+
+    '</tr>';
+  });
+  html += '</tbody></table></div></div>';
+  return html;
+}
+
+/* ================= informe de semáforo (adaptado del panel vigente de Eje Cafetero) ================= */
+var IX_DEFAULT = {banda:null, linea:"", q:"", sortK:"dias", sortDir:1, lim:60, bmode:"n", alertAll:false, ref:null};
+function ix(){ if(!state._ix) state._ix = Object.assign({}, IX_DEFAULT); return state._ix; }
+function fmtMoneyC(n){ return Math.abs(n)>=1e6 ? "$ "+Math.round(n/1e6).toLocaleString("es-CO")+" M" : fmtMoney(n); }
+function fmtPct(x){ return x.toLocaleString("es-CO",{maximumFractionDigits:1}); }
+
+function ixLotes(items, ref){
+  var out = [];
+  items.forEach(function(it){
+    var cu = (it.costoUnit||0)/(it.factorUM||1); /* SIESA entrega el costo por empaque (caja): se lleva a costo por unidad */
+    (it.registros||[]).forEach(function(r){
+      var cant = Number(r.cantidad)||0, d = diasEntre(r.fechaVenc, ref);
+      out.push({cod:it.referencia, desc:it.descItem||"", linea:it.lineaProveedor||"Sin línea", cant:cant, fecha:r.fechaVenc, dias:d, banda:bandaDe(d), costo:cant*cu});
+    });
+  });
+  return out;
+}
+
+function ixPill(banda){ var b = BANDA_POR_ID[banda]; return '<span class="pill '+b.cls+' dot">'+b.n+'</span>'; }
+function ixDiasTxt(d){ return d<0 ? "vencido hace "+(-d)+(d===-1?" día":" días") : d===0 ? "vence hoy" : "en "+d+(d===1?" día":" días"); }
+
+function renderIndicadoresTab(items){
+  var S = ix();
+  var ref = S.ref || todayISO();
+  var todos = ixLotes(items, ref);
+  if(!todos.length){
+    return '<div class="card empty">Todavía no hay lotes registrados (cantidad + fecha de vencimiento) en esta carga. Este informe se llena a medida que los operarios van capturando información.</div>';
+  }
+  var lineas = Array.from(new Set(todos.map(function(l){ return l.linea; }))).sort();
+  if(S.linea && lineas.indexOf(S.linea)<0) S.linea = "";
+  var q = (S.q||"").trim().toLowerCase();
+  var base = todos.filter(function(l){
+    if(S.linea && l.linea!==S.linea) return false;
+    if(q && (l.cod+" "+l.desc).toLowerCase().indexOf(q)<0) return false;
+    return true;
+  });
+
+  var by = {}; BANDAS.forEach(function(b){ by[b.id] = {refs:{}, u:0, c:0, n:0}; });
+  var refs = {}, uTot = 0, cTot = 0;
+  base.forEach(function(l){
+    var b = by[l.banda]; b.refs[l.cod] = 1; b.u += l.cant; b.c += l.costo; b.n++;
+    refs[l.cod] = 1; uTot += l.cant; cTot += l.costo;
+  });
+  function pc(x){ return fmtPct(cTot ? x/cTot*100 : 0); }
+  function kpi(l, v, n, c){ return '<div class="kpi '+(c||"")+'"><div class="l">'+l+'</div><div class="v">'+v+'</div><div class="n">'+(n||"")+'</div></div>'; }
+
+  var html = '<div class="ix-bar">'+
+    '<label class="hint" for="ixRef" style="margin:0;">Fecha de referencia</label>'+
+    '<input type="date" id="ixRef" value="'+esc(ref)+'">'+
+    '<button class="btn sm" id="ixHoy" type="button">Hoy</button>'+
+    '<select id="ixLinea" class="grow" aria-label="Línea proveedor"><option value="">Todas las líneas de proveedor</option>'+
+      lineas.map(function(k){ return '<option value="'+esc(k)+'"'+(S.linea===k?" selected":"")+'>'+esc(k)+'</option>'; }).join("")+'</select>'+
+    '<input type="search" id="ixQ" class="grow" placeholder="Buscar código o descripción" value="'+esc(S.q||"")+'" aria-label="Buscar código o descripción">'+
+    (S.banda ? '<span class="ix-chip">Rango: '+esc(BANDA_POR_ID[S.banda].n)+'<button type="button" data-x="banda" aria-label="Quitar rango">×</button></span>' : '')+
+    '<button class="btn sm" id="ixLimpiar" type="button">Limpiar filtros</button>'+
+  '</div>';
+
+  html += '<div class="kpis">'+
+    kpi("Referencias", fmtNum(Object.keys(refs).length,0), fmtNum(base.length,0)+" lotes registrados")+
+    kpi("Unidades", fmtNum(uTot,0), "contadas físicamente")+
+    kpi("Costo de existencia", fmtMoneyC(cTot), fmtMoney(cTot))+
+    kpi("Costo vencido", fmtMoneyC(by.vencido.c), pc(by.vencido.c)+" % · "+fmtNum(by.vencido.n,0)+" lotes", "crit")+
+    kpi("Costo de 1 a 30 días", fmtMoneyC(by.b1.c), pc(by.b1.c)+" % · "+fmtNum(by.b1.n,0)+" lotes", "risk")+
+    kpi("Costo de 31 a 60 días", fmtMoneyC(by.b2.c), pc(by.b2.c)+" % · "+fmtNum(by.b2.n,0)+" lotes", "warn")+
+  '</div>';
+
+  /* rangos de vencimiento */
+  var mx = 0; BANDAS.forEach(function(b){ mx = Math.max(mx, by[b.id].c); });
+  var bandsHtml = BANDAS.map(function(b){
+    var x = by[b.id];
+    return '<button type="button" class="band-row" data-b="'+b.id+'" aria-pressed="'+(S.banda===b.id)+'" aria-label="Filtrar por '+b.n+'">'+
+      '<span class="nm"><span class="dotc '+b.bg+'"></span>'+b.n+'</span>'+
+      '<span class="bar-track"><span class="bar-seg '+b.bg+'" style="width:'+(mx ? Math.max(x.c/mx*100, x.c>0?2:0) : 0)+'%"></span></span>'+
+      '<span class="num"><b>'+fmtMoneyC(x.c)+'</b><span>'+fmtNum(Object.keys(x.refs).length,0)+' refs · '+fmtNum(x.u,0)+' un. · '+pc(x.c)+' %</span></span></button>';
+  }).join("");
+
+  /* líneas de proveedor con más alertas (vencido + 1 a 30 + 31 a 60) */
+  var m = S.bmode, porLinea = {};
+  base.forEach(function(l){
+    if(l.dias>60) return;
+    var o = porLinea[l.linea] || (porLinea[l.linea] = {linea:l.linea, vencido:0, b1:0, b2:0});
+    o[l.banda] += (m==="n" ? 1 : l.costo);
+  });
+  var lineaArr = Object.keys(porLinea).map(function(k){ var o = porLinea[k]; o.tot = o.vencido+o.b1+o.b2; return o; })
+    .sort(function(a,b){ return b.tot-a.tot; }).slice(0,10);
+  var lmx = lineaArr.length ? lineaArr[0].tot : 1;
+  var lineaHtml = lineaArr.length ? lineaArr.map(function(o){
+    return '<button type="button" class="band-row" data-lin="'+esc(o.linea)+'" aria-pressed="'+(S.linea===o.linea)+'" style="grid-template-columns:minmax(110px,170px) 1fr auto;">'+
+      '<span class="nm" style="overflow-wrap:anywhere;">'+esc(o.linea)+'</span>'+
+      '<span class="bar-track">'+["vencido","b1","b2"].map(function(k){ return o[k]>0 ? '<span class="bar-seg '+BANDA_POR_ID[k].bg+'" style="width:'+(o[k]/lmx*100)+'%"></span>' : ""; }).join("")+'</span>'+
+      '<span class="num"><b>'+(m==="n" ? fmtNum(o.tot,0)+" lotes" : fmtMoneyC(o.tot))+'</b></span></button>';
+  }).join("") : '<p class="note">No hay existencia vencida ni que venza en 60 días o menos para esta selección.</p>';
+
+  html += '<div class="ix-grid">'+
+    '<section class="card"><div class="hd"><h3>Rangos de vencimiento</h3><p>Costo de existencia por días para vencer. Selecciona un rango para filtrar la tabla.</p></div>'+bandsHtml+'</section>'+
+    '<section class="card"><div class="hd"><h3>Líneas de proveedor con más alertas</h3><p>Existencia vencida (morado), de 1 a 30 días (rojo) y de 31 a 60 días (amarillo). Selecciona una línea para filtrar.</p></div>'+
+      '<div class="seg" id="ixMode" role="group" aria-label="Medida"><button type="button" data-m="n" aria-pressed="'+(m==="n")+'">Lotes</button><button type="button" data-m="c" aria-pressed="'+(m==="c")+'">Costo</button></div>'+
+      lineaHtml+
+    '</section></div>';
+
+  /* alertas */
+  var crit = base.filter(function(l){ return l.dias<=10; }).sort(function(a,b){ return a.dias-b.dias; });
+  var m30 = base.filter(function(l){ return l.dias>10 && l.dias<=30 && l.costo>=1000000; }).sort(function(a,b){ return b.costo-a.costo; });
+  var allm30 = base.filter(function(l){ return l.dias>10 && l.dias<=30; }).length;
+  var alertas = crit.map(function(l){ return {l:l, pill: l.dias<=0 ? "Vencido" : "10 días o menos", venc: l.dias<=0}; })
+    .concat(m30.map(function(l){ return {l:l, pill:"11 a 30 días", venc:false}; }));
+  var lim = S.alertAll ? alertas.length : 6;
+  var alertHtml = alertas.slice(0,lim).map(function(a){
+    return '<li class="alert'+(a.venc?" venc":"")+'"><span class="pill '+(a.venc?"critical":"red")+' dot">'+a.pill+'</span>'+
+      '<div class="t"><b>'+esc(a.l.desc)+'</b><span>'+esc(a.l.cod)+' · '+fmtNum(a.l.cant,0)+' un. · vence el '+fmtFecha(a.l.fecha)+' ('+ixDiasTxt(a.l.dias)+')</span></div>'+
+      '<div class="m">'+fmtMoney(a.l.costo)+'</div></li>';
+  }).join("") || '<li class="note">Sin alertas para esta selección.</li>';
+
+  /* top 10 referencias en riesgo (riesgo ponderado) */
+  var porRef = {};
+  base.forEach(function(l){
+    var w = BANDA_POR_ID[l.banda].w; if(!w) return;
+    var o = porRef[l.cod] || (porRef[l.cod] = {cod:l.cod, desc:l.desc, c:0, u:0, score:0, dmin:1e9});
+    o.c += l.costo; o.u += l.cant; o.score += l.costo*w; if(l.dias<o.dmin) o.dmin = l.dias;
+  });
+  var top = Object.keys(porRef).map(function(k){ return porRef[k]; }).sort(function(a,b){ return b.score-a.score; }).slice(0,10);
+  var tmx = top.length ? top[0].score : 1;
+  var topHtml = top.map(function(o,i){
+    var bd = BANDA_POR_ID[bandaDe(o.dmin)];
+    return '<li class="t10"><span class="rk">'+(i+1)+'</span><div><b>'+esc(o.desc)+'</b>'+
+      '<div class="meta"><span>'+esc(o.cod)+'</span><span>'+fmtNum(o.u,0)+' un. en riesgo</span><span>Primer vencimiento: '+(o.dmin<=0?"vencido":o.dmin+" días")+'</span>'+
+      '<span class="pill '+bd.cls+' dot">'+bd.n+'</span><span class="val">'+fmtMoney(o.c)+'</span></div>'+
+      '<div class="bar"><i class="'+bd.bg+'" style="width:'+(o.score/tmx*100)+'%"></i></div></div></li>';
+  }).join("") || '<li class="note">No hay referencias con 90 días o menos en esta selección.</li>';
+
+  html += '<div class="ix-grid">'+
+    '<section class="card"><div class="hd"><h3>Alertas</h3><p>'+fmtNum(crit.length,0)+(crit.length===1?" lote vence":" lotes vencen")+' en 10 días o menos (incluye vencidos) · '+fmtNum(allm30,0)+' entre 11 y 30 días (se listan los de costo igual o mayor a $ 1.000.000)</p></div>'+
+      '<ul class="alerts">'+alertHtml+'</ul>'+
+      (alertas.length>6 ? '<button class="btn sm" id="ixAlertMore" type="button" style="align-self:flex-start;">'+(S.alertAll?"Ver menos":"Ver las "+alertas.length+" alertas")+'</button>' : '')+
+    '</section>'+
+    '<section class="card"><div class="hd"><h3>Top 10 referencias en riesgo</h3><p>Mayor costo que se perdería si lo que vence en 90 días o menos termina destruido.</p></div>'+
+      '<ol class="top10">'+topHtml+'</ol>'+
+      '<p class="note">Orden por riesgo ponderado: costo × 100 % si está vencido o vence en 30 días o menos, × 60 % de 31 a 60 días y × 30 % de 61 a 90 días.</p>'+
+    '</section></div>';
+
+  /* detalle */
+  var lista = base.filter(function(l){ return !S.banda || l.banda===S.banda; });
+  var k = S.sortK, dir = S.sortDir;
+  lista.sort(function(a,b){
+    var x, y;
+    if(k==="dias"||k==="fecha"||k==="banda"){ x = a.dias; y = b.dias; }
+    else if(k==="cant"||k==="costo"){ x = a[k]; y = b[k]; }
+    else { x = String(a[k]).toLowerCase(); y = String(b[k]).toLowerCase(); }
+    return ((x<y?-1:x>y?1:0)*dir) || (a.dias-b.dias);
+  });
+  var COLS = [["cod","Referencia"],["desc","Descripción"],["linea","Línea proveedor"],["cant","Unidades","r"],["fecha","Vence","r"],["dias","Días","r"],["costo","Costo existencia","r"],["banda","Semáforo"]];
+  var thead = '<tr>'+COLS.map(function(c){
+    var sk = c[0]==="fecha"||c[0]==="banda" ? "dias" : c[0];
+    var activo = c[0]===k;
+    return '<th class="'+(c[2]||"")+'" data-k="'+sk+'" aria-sort="'+(activo?(dir>0?"ascending":"descending"):"none")+'">'+c[1]+'</th>';
+  }).join("")+'</tr>';
+  var tot = 0; lista.forEach(function(l){ tot += l.costo; });
+  var tbody = lista.slice(0,S.lim).map(function(l){
+    return '<tr><td class="mono">'+esc(l.cod)+'</td><td>'+esc(l.desc)+'</td><td>'+esc(l.linea)+'</td>'+
+      '<td class="num">'+fmtNum(l.cant,0)+'</td><td class="num">'+fmtFecha(l.fecha)+'</td><td class="num">'+l.dias+'</td>'+
+      '<td class="num">'+fmtMoney(l.costo)+'</td><td>'+ixPill(l.banda)+'</td></tr>';
+  }).join("") || '<tr><td colspan="8" class="empty">No hay lotes para esta selección.</td></tr>';
+  html += '<section class="card ix"><div class="hd"><h3>Detalle de inventario</h3><p>'+fmtNum(lista.length,0)+' lotes · '+fmtMoney(tot)+'</p></div>'+
+    '<div class="ix-table tablewrap"><table id="ixTbl"><thead>'+thead+'</thead><tbody>'+tbody+'</tbody></table></div>'+
+    (lista.length>S.lim ? '<button class="btn sm" id="ixDetMore" type="button" style="align-self:flex-start;">Mostrar '+Math.min(60,lista.length-S.lim)+' más ('+fmtNum(lista.length-S.lim,0)+' restantes)</button>' : '')+
+  '</section>';
+
+  html += '<p class="footer-note" style="text-align:left;">Costo por unidad = costo promedio de SIESA ÷ Factor U.M. (SIESA lo entrega por empaque/caja). Las unidades y fechas son las registradas por los operarios en el conteo físico.</p>';
+  return html;
+}
+
+function wireIndicadoresTab(){
+  var S = ix();
+  var $ = function(sel){ return root.querySelector(sel); };
+  if(!$("#ixRef")) return;
+  $("#ixRef").onchange = function(e){ if(e.target.value){ S.ref = e.target.value; render(); } };
+  $("#ixHoy").onclick = function(){ S.ref = null; render(); };
+  $("#ixLinea").onchange = function(e){ S.linea = e.target.value; S.lim = 60; render(); };
+  var qEl = $("#ixQ");
+  qEl.oninput = debounce(function(e){ S.q = e.target.value; S.lim = 60; state._ixFocusQ = true; render(); }, 200);
+  if(state._ixFocusQ){ state._ixFocusQ = false; qEl.focus(); try{ qEl.setSelectionRange(qEl.value.length, qEl.value.length); }catch(e){} }
+  $("#ixLimpiar").onclick = function(){ S.banda = null; S.linea = ""; S.q = ""; S.lim = 60; render(); };
+  var chip = $("[data-x=banda]"); if(chip) chip.onclick = function(){ S.banda = null; render(); };
+  root.querySelectorAll("[data-b]").forEach(function(b){ b.onclick = function(){ var id = b.getAttribute("data-b"); S.banda = S.banda===id ? null : id; S.lim = 60; render(); }; });
+  root.querySelectorAll("[data-lin]").forEach(function(b){ b.onclick = function(){ var l = b.getAttribute("data-lin"); S.linea = S.linea===l ? "" : l; S.lim = 60; render(); }; });
+  root.querySelectorAll("#ixMode [data-m]").forEach(function(b){ b.onclick = function(){ S.bmode = b.getAttribute("data-m"); render(); }; });
+  var am = $("#ixAlertMore"); if(am) am.onclick = function(){ S.alertAll = !S.alertAll; render(); };
+  var dm = $("#ixDetMore"); if(dm) dm.onclick = function(){ S.lim += 60; render(); };
+  root.querySelectorAll("#ixTbl th").forEach(function(th){
+    th.onclick = function(){
+      var k = th.getAttribute("data-k");
+      if(S.sortK===k) S.sortDir *= -1; else { S.sortK = k; S.sortDir = (k==="cant"||k==="costo") ? -1 : 1; }
+      render();
+    };
+  });
+}
+
+function showQrModal(){
+  var m = document.createElement("div");
+  m.className = "modal-bg";
+  m.innerHTML = '<div class="modal"><div class="modal-head"><h2 style="font-size:17px;">Acceso para operarios</h2><button id="mClose">×</button></div>'+
+    '<p class="hint" style="margin-bottom:10px;">El operario escanea este código con la cámara de su celular para abrir la app y luego ingresa con su nombre y rol de Operario. No requiere instalar nada.</p>'+
+    '<div class="qr-box"><div id="qrcanvas"></div><code style="font-size:11px;word-break:break-all;text-align:center;">'+esc(location.href)+'</code></div>'+
+  '</div>';
+  document.body.appendChild(m);
+  m.querySelector("#mClose").onclick = function(){ m.remove(); };
+  m.onclick = function(e){ if(e.target===m) m.remove(); };
+  try{
+    if(window.QRCode){ new QRCode(m.querySelector("#qrcanvas"), {text: location.href, width:200, height:200}); }
+    else { m.querySelector("#qrcanvas").textContent = "No se pudo generar el QR en este navegador."; }
+  }catch(e){ m.querySelector("#qrcanvas").textContent = "No se pudo generar el QR."; }
+}
+
+/* ================= operario: pick carga (home) ================= */
+function operarioCargasConAsignacion(){
+  return state.cargas;
+}
+
+function renderOperarioHome(){
+  var html = renderTopbar() + '<div class="wrap narrow">';
+  html += '<p class="eyebrow">Tus asignaciones</p><h1 style="font-size:20px;margin-bottom:14px;">Elige una carga</h1>';
+  if(!state.cargas.length){
+    html += '<div class="card empty">Aún no hay ninguna carga creada por un coordinador. Pídele que cree una y te asigne referencias.</div>';
+  } else {
+    state.cargas.forEach(function(c){
+      html += '<div class="item-row" data-id="'+c.id+'"><div class="ico">📦</div><div class="info"><div class="t">'+esc(c.bodegaDesc||"Carga")+'</div><div class="m">'+esc(c.bodega||"")+' · '+(c.totalItems||0)+' referencias</div></div><div>→</div></div>';
+    });
+  }
+  html += '</div>';
+  root.innerHTML = html;
+  wireTopbar();
+  root.querySelectorAll(".item-row").forEach(function(r){ r.onclick = function(){ openCargaOperario(r.getAttribute("data-id")); }; });
+}
+
+function openCargaOperario(id){
+  if(state.unsubItems) state.unsubItems();
+  var unsub = Store.onItems(id, function(items){ setState({items:items}); });
+  setState({currentCargaId:id, view:"mine", unsubItems:unsub});
+}
+
+/* ================= operario: my items ================= */
+function myItems(){
+  return state.items.filter(function(it){ return it.asignadoA === state.identity.email; });
+}
+
+function renderOperarioMine(){
+  var mine = myItems();
+  var pend = mine.filter(function(i){return i.estado!=="finalizado";});
+  var done = mine.filter(function(i){return i.estado==="finalizado";});
+  var pct = mine.length ? Math.round(done.length/mine.length*100) : 0;
+
+  var html = renderTopbar() + '<div class="wrap narrow">';
+  html += '<button class="btn ghost sm" id="backBtn" style="margin-bottom:8px;">← Cambiar carga</button>';
+  html += '<p class="eyebrow">Mis referencias</p><h1 style="font-size:20px;margin-bottom:10px;">'+mine.length+' asignadas</h1>';
+
+  if(!mine.length){
+    html += '<div class="card empty">No tienes referencias asignadas en esta carga todavía (buscando por tu correo "'+esc(state.identity.email)+'"). Pide al coordinador que te asigne alguna, usando exactamente ese correo.</div></div>';
+    root.innerHTML = html; wireTopbar();
+    root.querySelector("#backBtn").onclick = backToOperarioHome;
+    return;
+  }
+
+  html += '<div class="card" style="margin-bottom:14px;"><div style="display:flex;justify-content:space-between;font-size:12.5px;color:var(--muted);margin-bottom:6px;"><span>Avance</span><span>'+done.length+'/'+mine.length+'</span></div><div class="progress-bar"><div style="width:'+pct+'%;"></div></div></div>';
+
+  html += '<button class="scan-btn" id="btnScan">📷 Escanear código de barras</button>';
+  html += '<div class="searchbar"><input id="searchInput" autocomplete="off" placeholder="Buscar por descripción..." value="'+esc(state._search||"")+'"></div>';
+  html += '<div id="mineListBox">'+buildMineListHtml(mine)+'</div>';
+
+  html += '</div>';
+  root.innerHTML = html;
+  wireTopbar();
+  root.querySelector("#backBtn").onclick = backToOperarioHome;
+  root.querySelector("#btnScan").onclick = openScanner;
+  wireMineListClicks();
+  var searchInput = root.querySelector("#searchInput");
+  searchInput.oninput = debounce(function(e){
+    state._search = e.target.value;
+    var box = root.querySelector("#mineListBox");
+    if(box){ box.innerHTML = buildMineListHtml(myItems()); wireMineListClicks(); }
+  }, 120);
+}
+
+function buildMineListHtml(mine){
+  var list = mine.filter(function(it){
+    if(!state._search) return true;
+    return it.descItem.toLowerCase().indexOf(state._search.toLowerCase())>-1;
+  });
+  if(!list.length){
+    return '<div class="card empty">Ningún producto asignado coincide con "'+esc(state._search||"")+'".</div>';
+  }
+  return list.map(function(it){
+    var badge = it.estado==="finalizado" ? '<span class="pill green dot">Listo</span>' : it.estado==="en_progreso" ? '<span class="pill amber dot">En curso</span>' : '<span class="pill neutral dot">Pendiente</span>';
+    return '<div class="item-row" data-id="'+it.id+'"><div class="ico">🏷️</div><div class="info"><div class="t">'+esc(it.descItem)+'</div><div class="m">Ref. '+esc(it.referencia)+' · '+(it.registros?it.registros.length:0)+' lote(s)</div></div>'+badge+'</div>';
+  }).join("");
+}
+
+function wireMineListClicks(){
+  root.querySelectorAll("#mineListBox .item-row").forEach(function(r){
+    r.onclick = function(){ openEntry(r.getAttribute("data-id"), false); };
+  });
+}
+
+function backToOperarioHome(){
+  if(state.unsubItems) state.unsubItems();
+  setState({view:"home", currentCargaId:null, items:[], unsubItems:null});
+}
+
+/* ================= operario: scanner modal ================= */
+var zxingReader = null;
+function openScanner(){
+  var m = document.createElement("div");
+  m.className = "modal-bg";
+  m.innerHTML = '<div class="modal">'+
+    '<div class="modal-head"><h2 style="font-size:17px;">Escanear código de barras</h2><button id="mClose">×</button></div>'+
+    '<div class="video-wrap"><video id="scanVideo" muted playsinline></video><div class="frame"><div class="laser"></div></div></div>'+
+    '<div id="scanStatus" class="hint" style="margin-bottom:10px;">Apunta la cámara al código de barras del producto.</div>'+
+    '<div style="border-top:1px solid var(--border);padding-top:12px;">'+
+      '<label style="display:block;font-size:12.5px;font-weight:600;color:var(--ink-soft);margin-bottom:6px;">¿No escanea? Escribe el código manualmente</label>'+
+      '<div style="display:flex;gap:8px;"><input id="manualCode" placeholder="Código de barras" style="flex:1;padding:11px 14px;border:1.5px solid var(--border);border-radius:var(--radius-md);background:var(--bg);"><button class="btn" id="btnManual">Buscar</button></div>'+
+    '</div>'+
+  '</div>';
+  document.body.appendChild(m);
+
+  function close(){
+    try{ if(zxingReader) zxingReader.reset(); }catch(e){}
+    zxingReader = null;
+    m.remove();
+  }
+  m.querySelector("#mClose").onclick = close;
+  m.onclick = function(e){ if(e.target===m) close(); };
+
+  m.querySelector("#btnManual").onclick = function(){
+    var code = m.querySelector("#manualCode").value.trim();
+    if(code) handleScanResult(code, close, m);
+  };
+
+  if(window.ZXing && navigator.mediaDevices && navigator.mediaDevices.getUserMedia){
+    try{
+      zxingReader = new ZXing.BrowserMultiFormatReader();
+      var onFrame = function(result, err){
+        if(result){ handleScanResult(result.getText(), close, m); }
+      };
+      var constraints = {video:{facingMode:{ideal:"environment"}, width:{ideal:1920}, height:{ideal:1080}, advanced:[{focusMode:"continuous"}]}};
+      zxingReader.decodeFromConstraints(constraints, "scanVideo", onFrame).catch(function(){
+        return zxingReader.decodeFromVideoDevice(null, "scanVideo", onFrame);
+      }).catch(function(err){
+        m.querySelector("#scanStatus").innerHTML = '<span style="color:var(--danger);">No se pudo acceder a la cámara ('+esc(err&&err.name||"error")+'). Usa el código manual abajo.</span>';
+      });
+    }catch(e){
+      m.querySelector("#scanStatus").innerHTML = '<span style="color:var(--danger);">El escáner no está disponible en este navegador. Usa el código manual.</span>';
+    }
+  } else {
+    m.querySelector("#scanStatus").innerHTML = 'Cámara no disponible en este navegador/dispositivo. Usa el código manual abajo.';
+  }
+}
+
+function handleScanResult(code, close, modal){
+  try{ if(zxingReader) zxingReader.reset(); }catch(e){}
+  var mine = myItems();
+  var match = mine.find(function(it){ return it.barcode && it.barcode===code; });
+  close();
+  if(match){
+    openEntry(match.id, false);
+  } else {
+    showMismatchModal(code);
+  }
+}
+
+function showMismatchModal(code){
+  var mine = myItems();
+  var m = document.createElement("div");
+  m.className = "modal-bg";
+  m.innerHTML = '<div class="modal">'+
+    '<div class="modal-head"><h2 style="font-size:17px;">Código no coincide</h2><button id="mClose">×</button></div>'+
+    '<div class="banner warn">El código <code>'+esc(code)+'</code> no está en tus referencias asignadas con ese código de barras (RF-07). Es posible que el código físico del producto sea distinto al registrado en SIESA. Confirma el producto por descripción.</div>'+
+    '<div class="field"><label>Buscar por descripción</label><input id="mismatchSearch" placeholder="Escribe parte del nombre del producto"></div>'+
+    '<div id="mismatchResults"></div>'+
+  '</div>';
+  document.body.appendChild(m);
+  m.querySelector("#mClose").onclick = function(){ m.remove(); };
+  m.onclick = function(e){ if(e.target===m) m.remove(); };
+  function renderResults(q){
+    var box = m.querySelector("#mismatchResults");
+    var list = mine.filter(function(it){ return !q || it.descItem.toLowerCase().indexOf(q.toLowerCase())>-1; }).slice(0,8);
+    box.innerHTML = list.map(function(it){
+      return '<div class="item-row" data-id="'+it.id+'"><div class="ico">🏷️</div><div class="info"><div class="t">'+esc(it.descItem)+'</div><div class="m">Ref. '+esc(it.referencia)+'</div></div></div>';
+    }).join("") || '<div class="hint">Sin resultados.</div>';
+    box.querySelectorAll(".item-row").forEach(function(r){
+      r.onclick = function(){ m.remove(); openEntry(r.getAttribute("data-id"), true, code); };
+    });
+  }
+  renderResults("");
+  m.querySelector("#mismatchSearch").oninput = debounce(function(e){ renderResults(e.target.value); }, 120);
+}
+
+/* ================= operario: entry screen ================= */
+function openEntry(itemId, manualConfirm, scannedCode){
+  state.activeItemId = itemId;
+  state._entryManualConfirm = manualConfirm || false;
+  state._entryScannedCode = scannedCode || null;
+  state._entryCantidad = "";
+  state._entryFecha = todayISO();
+  setState({view:"entry"});
+}
+
+function renderOperarioEntry(){
+  var it = state.items.find(function(x){return x.id===state.activeItemId;});
+  if(!it){ setState({view:"mine"}); return; }
+  var html = renderTopbar() + '<div class="wrap narrow">';
+  html += '<button class="btn ghost sm" id="backBtn" style="margin-bottom:8px;">← Volver a mi lista</button>';
+
+  if(state._entryManualConfirm){
+    html += '<div class="banner warn">Producto confirmado manualmente por descripción (el código escaneado <code>'+esc(state._entryScannedCode||"")+'</code> no coincidía). Esto queda registrado.</div>';
+  }
+
+  html += '<div class="card" style="margin-bottom:14px;">'+
+    '<p class="eyebrow">Ref. '+esc(it.referencia)+' · '+esc(it.um)+'</p>'+
+    '<h1 style="font-size:19px;margin-bottom:8px;">'+esc(it.descItem)+'</h1>'+
+    '<div class="hint">Código de barras SIESA: <span class="mono">'+esc(it.barcode||"—")+'</span></div>'+
+    '<div class="hint">Grupo Shopper: '+esc(it.grupoShopper||"—")+'</div>'+
+  '</div>';
+
+  html += '<div class="card" style="margin-bottom:14px;">'+
+    '<h3 style="font-size:15px;margin-bottom:12px;">Registrar lote</h3>'+
+    '<div class="field"><label>Cantidad (unidades)</label><input id="cantInput" type="number" min="0" step="0.01" placeholder="Ej: 12" value="'+esc(state._entryCantidad)+'"></div>'+
+    '<div class="field"><label>Fecha de vencimiento</label><input id="fechaInput" type="date" value="'+esc(state._entryFecha)+'"><div class="hint">Si el producto ya está vencido físicamente, elige su fecha real aunque sea anterior a hoy.</div></div>'+
+    '<button class="btn primary block" id="btnSaveLote">Guardar lote</button>'+
+  '</div>';
+
+  var regs = it.registros || [];
+  html += '<div class="card">'+
+    '<h3 style="font-size:15px;margin-bottom:10px;">Lotes registrados ('+regs.length+')</h3>';
+  if(!regs.length){
+    html += '<div class="hint">Aún no hay lotes registrados para esta referencia.</div>';
+  } else {
+    regs.forEach(function(r, idx){
+      html += '<div class="lote-row"><span>'+fmtNum(r.cantidad,2)+' und · vence '+esc(r.fechaVenc)+'</span><button class="x" data-idx="'+idx+'">✕</button></div>';
+    });
+  }
+  html += '<button class="btn block" id="btnDone" style="margin-top:12px;" '+(regs.length?"":"disabled")+'>Marcar referencia como contada ✓</button>';
+  html += '</div>';
+
+  html += '</div>';
+  root.innerHTML = html;
+  wireTopbar();
+
+  root.querySelector("#backBtn").onclick = function(){ setState({view:"mine"}); };
+  root.querySelector("#cantInput").oninput = function(e){ state._entryCantidad = e.target.value; };
+  root.querySelector("#fechaInput").oninput = function(e){ state._entryFecha = e.target.value; };
+  root.querySelector("#btnSaveLote").onclick = async function(){
+    var cant = parseFloat(state._entryCantidad);
+    var fecha = state._entryFecha;
+    if(!cant || cant<=0){ await notify("Ingresa una cantidad válida."); return; }
+    if(!fecha){ await notify("Elige una fecha de vencimiento."); return; }
+    if(fecha < todayISO() && !(await askConfirm("La fecha "+fecha+" ya pasó. ¿Confirmas que este producto está físicamente vencido?"))){ return; }
+    await Store.addRegistro(state.currentCargaId, it.id, {
+      cantidad:cant, fechaVenc:fecha, capturadoPor:state.identity.email, capturadoEn:new Date().toISOString(),
+      confirmadoManual: state._entryManualConfirm, codigoEscaneado: state._entryScannedCode
+    });
+    state._entryCantidad = ""; state._entryManualConfirm = false; state._entryScannedCode = null;
+    render();
+  };
+  root.querySelectorAll(".lote-row .x").forEach(function(b){
+    b.onclick = async function(){ await Store.removeRegistro(state.currentCargaId, it.id, parseInt(b.getAttribute("data-idx"),10)); render(); };
+  });
+  var doneBtn = root.querySelector("#btnDone");
+  if(doneBtn) doneBtn.onclick = async function(){ await Store.finalizarItem(state.currentCargaId, it.id); setState({view:"mine"}); };
+}
+
+/* ================= main render dispatcher ================= */
+function render(){
+  if(!state.identity){ renderLogin(); return; }
+  if(state.identity.rol === "administrador"){
+    renderAdminPanel();
+  } else if(state.identity.rol === "coordinador"){
+    if(state.view==="detail" && state.currentCargaId) renderCoordinadorDetail();
+    else renderCoordinadorList();
+  } else {
+    if(state.view==="entry" && state.activeItemId) renderOperarioEntry();
+    else if(state.view==="mine" && state.currentCargaId) renderOperarioMine();
+    else renderOperarioHome();
+  }
+}
+
+/* ================= boot ================= */
+(async function boot(){
+  root.innerHTML = '<div class="login-shell"><div class="hint">Cargando…</div></div>';
+  await Store.init();
+  state.syncMode = USE_DB ? "db" : "local";
+  Store.onCargas(function(list){ setState({cargas:list}); });
+  Store.onUsuarios(function(list){ setState({usuarios:list}); });
+})();
+
+})();
+</script>
