@@ -83,6 +83,11 @@ input:focus-visible, button:focus-visible, select:focus-visible{ outline:2px sol
 .who button:hover{ border-color:var(--accent); color:var(--accent); }
 #themeToggle{ padding:0; width:32px; height:32px; display:inline-flex; align-items:center; justify-content:center; font-size:15px; line-height:1; background:var(--surface-2); }
 
+@media (max-width:640px){
+  .topbar{ flex-wrap:wrap; padding:10px 12px; }
+  .brand .sub{ display:none; }
+  .who{ flex-wrap:wrap; justify-content:flex-end; margin-left:auto; gap:8px; }
+}
 .wrap{ max-width:1080px; margin:0 auto; padding:22px 18px 80px; }
 .wrap.narrow{ max-width:480px; }
 
