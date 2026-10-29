@@ -368,7 +368,7 @@ function askPrompt(message, defaultValue){
 }
 
 /* ================= storage backend: db capability, fallback to localStorage ================= */
-var USE_DB = false, dbNs = null;
+var USE_DB = false, dbNs = null, DB_BATCH = 1;
 var LS_KEY = "semaforos_demo_state_v1";
 var LS_AVAILABLE = true;
 try{ localStorage.setItem(LS_KEY+"__t","1"); localStorage.removeItem(LS_KEY+"__t"); }catch(e){ LS_AVAILABLE = false; }
@@ -385,6 +385,82 @@ function lsWrite(state){
 }
 var lsListeners = [];
 
+/* ================= Supabase (REST) =================
+   Misma interfaz que usa la app con el db de Claude (doc/collection/get/set/update/delete/onSnapshot).
+   Los cambios se detectan consultando cada 4 s una marca liviana (último cambio + conteo). */
+var SUPABASE_URL = "https://fbivjzmvtyxvtiovsskk.supabase.co", SUPABASE_KEY = "sb_publishable_zKpd8ztloRQKL_bm8pa1IA_fD_eJLkz";
+function makeSupabaseDb(){
+  var base = SUPABASE_URL.replace(/\/+$/,"") + "/rest/v1/";
+  var H = {apikey:SUPABASE_KEY, Authorization:"Bearer "+SUPABASE_KEY, "Content-Type":"application/json"};
+  function eq(v){ return "eq."+encodeURIComponent(v); }
+  async function call(method, path, body, extra){
+    var res = await fetch(base+path, {method:method, headers:Object.assign({}, H, extra||{}), body: body==null?undefined:JSON.stringify(body)});
+    if(!res.ok){ var t=""; try{ t = await res.text(); }catch(e){} throw new Error("Supabase "+res.status+": "+t.slice(0,200)); }
+    return res;
+  }
+  async function json(method, path, body, extra){
+    var res = await call(method, path, body, extra); var txt = await res.text(); return txt ? JSON.parse(txt) : null;
+  }
+  function splitPath(p){ var i = p.lastIndexOf("/"); return {col:p.slice(0,i), id:p.slice(i+1)}; }
+  function snapDoc(id, datos){ return {id:id, exists:datos!=null, data:function(){ return datos; }}; }
+  var listeners = [];
+  function refreshAll(){ listeners.forEach(function(l){ l.poll(); }); }
+  return {
+    ping: function(){ return json("GET", "documentos?select=id&limit=1"); },
+    doc: function(path){
+      var p = splitPath(path), q = "documentos?coleccion="+eq(p.col)+"&id="+eq(p.id);
+      return {
+        get: async function(){ var r = await json("GET", q+"&select=datos"); return snapDoc(p.id, r.length ? r[0].datos : null); },
+        set: async function(data){
+          await call("POST", "documentos?on_conflict=coleccion,id", {coleccion:p.col, id:p.id, datos:data, actualizado:new Date().toISOString()}, {Prefer:"resolution=merge-duplicates,return=minimal"});
+          refreshAll();
+        },
+        update: async function(data){ await call("POST", "rpc/actualizar_documento", {p_coleccion:p.col, p_id:p.id, p_cambios:data}); refreshAll(); },
+        delete: async function(){ await call("DELETE", q, null, {Prefer:"return=minimal"}); refreshAll(); }
+      };
+    },
+    collection: function(path){
+      var order = null;
+      function makeSnap(rows){
+        var list = rows.slice();
+        if(order) list.sort(function(a,b){
+          var x = (a.datos||{})[order.field], y = (b.datos||{})[order.field];
+          return ((x<y?-1:x>y?1:0)) * (order.dir==="desc"?-1:1);
+        });
+        return {docs: list.map(function(r){ return snapDoc(r.id, r.datos); })};
+      }
+      function fetchAll(){ return json("GET", "documentos?coleccion="+eq(path)+"&select=id,datos&order=id.asc"); }
+      async function marca(){
+        var res = await call("GET", "documentos?coleccion="+eq(path)+"&select=actualizado&order=actualizado.desc&limit=1", null, {Prefer:"count=exact"});
+        var rows = JSON.parse(await res.text() || "[]");
+        return (rows.length?rows[0].actualizado:"")+"|"+(res.headers.get("content-range")||"");
+      }
+      var c = {
+        orderBy: function(field, dir){ order = {field:field, dir:dir||"asc"}; return c; },
+        get: async function(){ return makeSnap(await fetchAll()); },
+        onSnapshot: function(cb, errCb){
+          var lastMarca = null, stopped = false, busy = false;
+          async function poll(){
+            if(stopped || busy) return; busy = true;
+            try{
+              var m = await marca();
+              if(m !== lastMarca){ var rows = await fetchAll(); if(!stopped){ lastMarca = m; cb(makeSnap(rows)); } }
+            }catch(e){ if(errCb && lastMarca===null){ lastMarca = ""; errCb(e); } }
+            busy = false;
+          }
+          var l = {poll:poll}; listeners.push(l); poll();
+          var t = setInterval(poll, 4000);
+          return function(){ stopped = true; clearInterval(t); listeners = listeners.filter(function(x){ return x!==l; }); };
+        }
+      };
+      return c;
+    }
+  };
+}
+async function inBatches(list, n, fn){
+  for(var i=0;i<list.length;i+=n){ await Promise.all(list.slice(i,i+n).map(fn)); }
+}
+
 var Store = {
   async init(){
     try{
@@ -393,6 +469,9 @@ var Store = {
         if(d){ dbNs = d; USE_DB = true; }
       }
     }catch(e){ USE_DB = false; }
+    if(!USE_DB && SUPABASE_URL && SUPABASE_KEY){
+      try{ var sb = makeSupabaseDb(); await sb.ping(); dbNs = sb; USE_DB = true; DB_BATCH = 8; }catch(e){ USE_DB = false; }
+    }
   },
 
   onCargas(cb){
@@ -424,9 +503,9 @@ var Store = {
     meta = Object.assign({creadoEn: new Date().toISOString(), operarios:[]}, meta);
     if(USE_DB){
       await dbNs.doc("cargas/"+cargaId).set(meta);
-      for(var i=0;i<items.length;i++){
-        await dbNs.doc("cargas/"+cargaId+"/items/"+items[i].referencia).set(Object.assign({estado:"pendiente", asignadoA:null, registros:[]}, items[i]));
-      }
+      await inBatches(items, DB_BATCH, function(it){
+        return dbNs.doc("cargas/"+cargaId+"/items/"+it.referencia).set(Object.assign({estado:"pendiente", asignadoA:null, registros:[]}, it));
+      });
     } else {
       var s = lsRead(); s.cargas = s.cargas||{};
       var itemsMap = {};
@@ -440,9 +519,9 @@ var Store = {
   async deleteCarga(cargaId){
     if(USE_DB){
       var snap = await dbNs.collection("cargas/"+cargaId+"/items").get();
-      for(var i=0;i<snap.docs.length;i++){
-        await dbNs.doc("cargas/"+cargaId+"/items/"+snap.docs[i].id).delete();
-      }
+      await inBatches(snap.docs, DB_BATCH, function(d){
+        return dbNs.doc("cargas/"+cargaId+"/items/"+d.id).delete();
+      });
       await dbNs.doc("cargas/"+cargaId).delete();
     } else {
       var s = lsRead();
@@ -454,9 +533,9 @@ var Store = {
   async resetCarga(cargaId){
     if(USE_DB){
       var snap = await dbNs.collection("cargas/"+cargaId+"/items").get();
-      for(var i=0;i<snap.docs.length;i++){
-        await dbNs.doc("cargas/"+cargaId+"/items/"+snap.docs[i].id).update({estado:"pendiente", asignadoA:null, registros:[]});
-      }
+      await inBatches(snap.docs, DB_BATCH, function(d){
+        return dbNs.doc("cargas/"+cargaId+"/items/"+d.id).update({estado:"pendiente", asignadoA:null, registros:[]});
+      });
       await dbNs.doc("cargas/"+cargaId).update({operarios:[]});
     } else {
       var s = lsRead(); var c = s.cargas[cargaId]; if(!c) return;
@@ -468,9 +547,9 @@ var Store = {
 
   async assignItems(cargaId, itemIds, operario){
     if(USE_DB){
-      for(var i=0;i<itemIds.length;i++){
-        await dbNs.doc("cargas/"+cargaId+"/items/"+itemIds[i]).update({asignadoA:operario});
-      }
+      await inBatches(itemIds, DB_BATCH, function(id){
+        return dbNs.doc("cargas/"+cargaId+"/items/"+id).update({asignadoA:operario});
+      });
       var cdoc = await dbNs.doc("cargas/"+cargaId).get();
       var ops = (cdoc.data()||{}).operarios || [];
       if(ops.indexOf(operario)===-1){ ops = ops.concat([operario]); await dbNs.doc("cargas/"+cargaId).update({operarios:ops}); }
