@@ -623,6 +623,11 @@ var Store = {
     }
   },
 
+  async setCargaCiudad(cargaId, ciudad, co){
+    if(USE_DB){ await dbNs.doc("cargas/"+cargaId).update({ciudad:ciudad, co:co}); }
+    else { var s = lsRead(); if(s.cargas && s.cargas[cargaId]){ Object.assign(s.cargas[cargaId].meta, {ciudad:ciudad, co:co}); lsWrite(s); } }
+  },
+
   async getItems(cargaId){
     if(USE_DB){
       var snap = await dbNs.collection("cargas/"+cargaId+"/items").get();
@@ -1313,9 +1318,16 @@ function renderCoordinadorDetail(){
 }
 
 function cargaActual(){ return state.cargas.filter(function(c){ return c.id===state.currentCargaId; })[0] || {}; }
+/* Auxiliares que se pueden asignar en la carga actual: los de su ciudad. Si la carga no tiene ciudad
+   (cargas anteriores) y quien la ve es el administrador, se ofrecen los de todas las ciudades. */
 function auxiliaresDeLaCarga(){
   var c = cargaActual();
-  return usuariosDeCiudad(c.ciudad || state.identity.ciudad, "operario");
+  if(c.ciudad) return usuariosDeCiudad(c.ciudad, "operario");
+  if(state.identity.rol==="administrador"){
+    return (state.usuarios||[]).filter(function(u){ return u.rol==="operario" && u.activo!==false; })
+      .sort(function(a,b){ return String(a.co).localeCompare(String(b.co)) || String(a.nombre).localeCompare(String(b.nombre)); });
+  }
+  return usuariosDeCiudad(state.identity.ciudad, "operario");
 }
 
 /* Modal para elegir uno o varios usuarios de una lista (reemplaza escribir correos). */
@@ -1326,7 +1338,7 @@ function askPickUsers(titulo, lista){
     m.innerHTML = '<div class="modal" style="max-width:420px;">'+
       '<div class="modal-head"><h2 style="font-size:17px;">'+esc(titulo)+'</h2><button id="pkClose">×</button></div>'+
       (lista.length ? lista.map(function(u){
-        return '<label class="assign-check" style="padding:8px 4px;border-bottom:1px solid var(--border);cursor:pointer;"><input type="checkbox" value="'+esc(u.id)+'" checked> <span>'+esc(u.nombre)+'</span></label>';
+        return '<label class="assign-check" style="padding:8px 4px;border-bottom:1px solid var(--border);cursor:pointer;"><input type="checkbox" value="'+esc(u.id)+'" checked> <span>'+esc(u.nombre)+(cargaActual().ciudad?"":" · "+esc(u.ciudad))+'</span></label>';
       }).join("") : '<p class="hint">No hay auxiliares registrados en esta ciudad.</p>')+
       '<div style="display:flex;gap:10px;justify-content:flex-end;margin-top:14px;">'+
         '<button class="btn" id="pkCancel">Cancelar</button><button class="btn primary" id="pkOk"'+(lista.length?"":" disabled")+'>Repartir</button>'+
@@ -1343,14 +1355,22 @@ function askPickUsers(titulo, lista){
 }
 
 function renderAsignarTab(items, operarios){
-  var aux = auxiliaresDeLaCarga();
-  var html = '<div class="card" style="margin-bottom:14px;">'+
+  var aux = auxiliaresDeLaCarga(), carga = cargaActual();
+  var esAdmin = state.identity.rol==="administrador", sinCiudad = !carga.ciudad;
+  var opcionesAux = aux.map(function(u){
+    return '<option value="'+esc(u.id)+'"'+(state.operarioInput===u.id?" selected":"")+'>'+esc(u.nombre)+(sinCiudad?" · "+esc(u.ciudad):"")+'</option>';
+  }).join("");
+  var html = '';
+  if(esAdmin && sinCiudad){
+    html += '<div class="banner warn">Esta carga no tiene ciudad asignada (es anterior a la separación por ciudades). Elige a qué ciudad pertenece para que solo la vean sus usuarios: '+
+      '<select id="cargaCiudad" style="margin-left:6px;padding:6px 10px;border:1.5px solid var(--border);border-radius:var(--radius-md);background:var(--surface);"><option value="">Elegir ciudad…</option>'+
+      CIUDADES.map(function(c){ return '<option value="'+esc(c.nombre)+'">'+esc(c.nombre)+'</option>'; }).join("")+'</select></div>';
+  }
+  html += '<div class="card" style="margin-bottom:14px;">'+
     '<div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;">'+
-      '<div class="field" style="flex:1;min-width:200px;margin-bottom:0;"><label>Asignar seleccionadas a</label>'+
-        '<select id="opSelect"><option value="">Elige un auxiliar…</option>'+
-          aux.map(function(u){ return '<option value="'+esc(u.id)+'"'+(state.operarioInput===u.id?" selected":"")+'>'+esc(u.nombre)+'</option>'; }).join("")+
-        '</select>'+
-        (aux.length?'':'<p class="hint">No hay auxiliares registrados en esta ciudad. El administrador debe crearlos en la pestaña "Usuarios".</p>')+
+      '<div class="field" style="flex:1;min-width:200px;margin-bottom:0;"><label>Asignar seleccionadas a'+(carga.ciudad?' · '+esc(carga.ciudad):'')+'</label>'+
+        '<select id="opSelect"><option value="">Elige un auxiliar…</option>'+opcionesAux+'</select>'+
+        (aux.length?'':'<p class="hint">No hay auxiliares registrados'+(carga.ciudad?' en '+esc(carga.ciudad):'')+'. Créalos en la pestaña "Usuarios".</p>')+
       '</div>'+
       '<button class="btn primary" id="btnAssign">Asignar</button>'+
       '<button class="btn" id="btnAutoAssign">Repartir equitativo</button>'+
@@ -1381,6 +1401,13 @@ function renderAsignarTab(items, operarios){
 function wireAsignarTab(){
   var sel = root.querySelector("#opSelect");
   if(!sel) return;
+  var cc = root.querySelector("#cargaCiudad");
+  if(cc) cc.onchange = async function(e){
+    var ciudad = e.target.value; if(!ciudad) return;
+    try{ await Store.setCargaCiudad(state.currentCargaId, ciudad, ciudadPorNombre(ciudad).co); }
+    catch(err){ await notify("No se pudo asignar la ciudad: "+(err&&err.message?err.message:err)); return; }
+    state.operarioInput = ""; render();
+  };
   sel.onchange = function(e){ state.operarioInput = e.target.value; };
   root.querySelectorAll(".rowchk").forEach(function(c){
     c.onchange = function(){ state.selectedIds[c.getAttribute("data-id")] = c.checked; };
