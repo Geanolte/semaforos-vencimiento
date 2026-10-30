@@ -294,15 +294,40 @@ function iconSemaforo(){
     '<circle cx="16" cy="36" r="5.5" fill="var(--green)"/>'+
   '</svg>';
 }
-function deriveNombreFromEmail(email){
-  var local = (String(email||"").split("@")[0]||"").replace(/[._-]+/g," ").trim();
-  if(!local) return email||"";
-  return local.split(" ").map(function(w){ return w.charAt(0).toUpperCase()+w.slice(1).toLowerCase(); }).join(" ");
+/* ---- ciudades, roles y usuarios ----
+   Cada usuario es un documento en "usuarios" con id "<C.O.>-<nombre-normalizado>" y campos
+   nombre, cargo, co, ciudad, rol (administrador | coordinador | operario), activo.
+   "coordinador" incluye supervisores; "operario" es el auxiliar de bodega. */
+var CIUDADES = [
+  {co:"006", nombre:"Pereira",   bodegaPref:"06", scan:"lector"},
+  {co:"007", nombre:"Armenia",   bodegaPref:"07", scan:"camara"},
+  {co:"008", nombre:"Manizales", bodegaPref:"08", scan:"camara"},
+  {co:"012", nombre:"Ibagué",    bodegaPref:"12", scan:"camara"},
+  {co:"018", nombre:"Neiva",     bodegaPref:"18", scan:"camara"}
+];
+var REGIONAL = {co:"REG", nombre:"Eje Cafetero"};
+var ROL_LABEL = {administrador:"Administrador", coordinador:"Coordinador / Supervisor", operario:"Auxiliar de bodega"};
+function ciudadPorCo(co){ return CIUDADES.filter(function(c){ return c.co===co; })[0] || null; }
+function ciudadPorNombre(n){ return CIUDADES.filter(function(c){ return c.nombre===n; })[0] || null; }
+function ciudadPorBodega(bodega){ var p = String(bodega||"").slice(0,2); return CIUDADES.filter(function(c){ return c.bodegaPref===p; })[0] || null; }
+function slugNombre(s){ return String(s||"").normalize("NFD").replace(/[̀-ͯ]/g,"").toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/^-+|-+$/g,""); }
+function userId(co, nombre){ return co+"-"+slugNombre(nombre); }
+function primerNombre(n){ return String(n||"").trim().split(/\s+/)[0]||""; }
+function nombreDe(id){
+  if(!id) return "";
+  var u = (state.usuarios||[]).filter(function(x){ return x.id===id; })[0];
+  return u && u.nombre ? u.nombre : id;
 }
-function nombrePorEmail(email){
-  if(!email) return "";
-  var u = (state.usuarios||[]).find(function(x){ return x.email===String(email).toLowerCase(); });
-  return (u&&u.nombre) ? u.nombre : deriveNombreFromEmail(email);
+function usuariosDeCiudad(ciudad, soloRol){
+  return (state.usuarios||[]).filter(function(u){
+    return u.activo!==false && u.ciudad===ciudad && (!soloRol || u.rol===soloRol);
+  }).sort(function(a,b){ return String(a.nombre).localeCompare(String(b.nombre)); });
+}
+/* Cargas que el usuario actual puede ver: el administrador ve todas (con filtro opcional); los demás, solo las de su ciudad. */
+function cargasVisibles(){
+  var id = state.identity; if(!id) return [];
+  if(id.rol==="administrador") return state.cargas.filter(function(c){ return !state._filtroCiudad || c.ciudad===state._filtroCiudad; });
+  return state.cargas.filter(function(c){ return c.ciudad===id.ciudad; });
 }
 function debounce(fn, ms){ var t; return function(){ var a=arguments,c=this; clearTimeout(t); t=setTimeout(function(){ fn.apply(c,a); }, ms); }; }
 
@@ -407,6 +432,7 @@ function makeSupabaseDb(){
   function refreshAll(){ listeners.forEach(function(l){ l.poll(); }); }
   return {
     ping: function(){ return json("GET", "documentos?select=id&limit=1"); },
+    rpc: function(nombre, args){ return json("POST", "rpc/"+nombre, args); },
     doc: function(path){
       var p = splitPath(path), q = "documentos?coleccion="+eq(p.col)+"&id="+eq(p.id);
       return {
@@ -590,6 +616,15 @@ var Store = {
     }
   },
 
+  async getItems(cargaId){
+    if(USE_DB){
+      var snap = await dbNs.collection("cargas/"+cargaId+"/items").get();
+      return snap.docs.map(function(d){ return Object.assign({id:d.id}, d.data()); });
+    }
+    var s = lsRead(), c = (s.cargas||{})[cargaId];
+    return c ? Object.keys(c.items||{}).map(function(id){ return Object.assign({id:id}, c.items[id]); }) : [];
+  },
+
   async finalizarItem(cargaId, itemId){
     if(USE_DB){ await dbNs.doc("cargas/"+cargaId+"/items/"+itemId).update({estado:"finalizado"}); }
     else { var s=lsRead(); s.cargas[cargaId].items[itemId].estado="finalizado"; lsWrite(s); }
@@ -607,9 +642,13 @@ var Store = {
     }
   },
 
-  async upsertUsuario(email, data){
-    var id = email.toLowerCase().trim();
-    var body = Object.assign({email:id, activo:true, actualizadoEn:new Date().toISOString()}, data);
+  /* Clave del administrador: se verifica en el servidor (Supabase) y nunca viaja ni se guarda en el código.
+     Si no hay Supabase (modo local o Claude), no hay dónde verificarla y se entra solo por nombre. */
+  tieneClaves(){ return !!(USE_DB && dbNs && dbNs.rpc); },
+  async verificarClave(usuario, clave){ return (await dbNs.rpc("verificar_clave", {p_usuario:usuario, p_clave:clave})) === true; },
+
+  async upsertUsuario(id, data){
+    var body = Object.assign({activo:true, actualizadoEn:new Date().toISOString()}, data);
     if(USE_DB){
       await dbNs.doc("usuarios/"+id).set(body);
     } else {
@@ -619,14 +658,12 @@ var Store = {
     }
   },
 
-  async setUsuarioActivo(email, activo){
-    var id = email.toLowerCase().trim();
+  async setUsuarioActivo(id, activo){
     if(USE_DB){ await dbNs.doc("usuarios/"+id).update({activo:activo}); }
     else { var s=lsRead(); if(s.usuarios && s.usuarios[id]){ s.usuarios[id].activo = activo; lsWrite(s); } }
   },
 
-  async deleteUsuario(email){
-    var id = email.toLowerCase().trim();
+  async deleteUsuario(id){
     if(USE_DB){ await dbNs.doc("usuarios/"+id).delete(); }
     else { var s=lsRead(); if(s.usuarios) delete s.usuarios[id]; lsWrite(s); }
   }
@@ -660,6 +697,11 @@ function clearIdentity(){ memIdentity = null; try{ sessionStorage.removeItem(IDE
 var state = {
   identity: getIdentity(),
   usuarios: [],
+  usuariosListos: false,
+  adminTab: "consolidado",
+  _consol: null,
+  _filtroCiudad: "",
+  _loginCo: coDesdeUrl(),
   cargas: [],
   currentCargaId: null,
   items: [],
@@ -678,81 +720,99 @@ var root = document.getElementById("app");
 function setState(patch){ Object.assign(state, patch); render(); }
 
 /* ================= identity screen ================= */
+function coDesdeUrl(){
+  try{
+    var p = new URLSearchParams(location.search).get("co");
+    if(p && (p==="REG" || ciudadPorCo(p))) return p;
+  }catch(e){}
+  return null;
+}
+function rolOrden(r){ return r==="administrador" ? 0 : r==="coordinador" ? 1 : 2; }
+
+function loginComo(u){
+  if(u.activo===false){ notify("Tu usuario está desactivado. Contacta al administrador."); return; }
+  var identity = {id:u.id, nombre:u.nombre, rol:u.rol, ciudad:u.ciudad, co:u.co};
+  setIdentity(identity);
+  setState({identity:identity, view: u.rol==="operario"?"home":"list", adminTab:"consolidado", currentCargaId:null, _consol:null});
+}
+
 function renderLogin(){
-  var role = state._loginRole || null;
-  var activos = (state.usuarios||[]).filter(function(u){ return u.activo!==false; })
-    .sort(function(a,b){ return String(a.nombre||a.email).localeCompare(String(b.nombre||b.email)); });
-  var esRegistrado = activos.some(function(u){ return u.email===state._loginEmail; });
-  var selValue = esRegistrado ? state._loginEmail : (state._loginOtro ? "__otro__" : "");
-  var mostrarInput = !activos.length || selValue==="__otro__";
+  var usuarios = state.usuarios||[];
+  var co = state._loginCo || null;
+  var cuerpo;
+  if(!state.usuariosListos){
+    cuerpo = '<p class="hint">Cargando usuarios…</p>';
+  } else if(!usuarios.length && Store.tieneClaves()){
+    cuerpo = '<div class="card empty">No hay usuarios registrados. Contacta al administrador del sistema.</div>';
+  } else if(!usuarios.length){
+    cuerpo = '<p class="hint" style="margin-bottom:12px;">Configuración inicial: todavía no hay usuarios. Crea el primer administrador regional.</p>'+
+      '<div class="field"><label>Nombre completo</label><input id="setupNombre" placeholder="Nombre y apellido"></div>'+
+      '<button class="btn primary block" id="setupGo">Crear administrador y entrar</button>';
+  } else if(!co){
+    cuerpo = '<p class="hint" style="margin-bottom:12px;">Elige tu ciudad (C.O.) para continuar.</p>'+
+      '<div class="role-choice">'+
+        CIUDADES.map(function(c){ return '<div class="role-btn" data-co="'+c.co+'"><b>'+esc(c.nombre)+'</b><span>C.O. '+c.co+'</span></div>'; }).join("")+
+        '<div class="role-btn" data-co="REG"><b>Regional</b><span>Administrador</span></div>'+
+      '</div>';
+  } else if(co==="REG" && Store.tieneClaves()){
+    cuerpo = '<button class="btn ghost sm" id="loginBack" style="margin-bottom:8px;">← Cambiar ciudad</button>'+
+      '<p class="eyebrow">Administrador · '+esc(REGIONAL.nombre)+'</p>'+
+      '<div class="field"><label>Usuario</label><input id="admUser" placeholder="Tu primer nombre" autocapitalize="none" autocomplete="username"></div>'+
+      '<div class="field"><label>Clave</label><input id="admPass" type="password" autocomplete="current-password"></div>'+
+      '<button class="btn primary block" id="admEntrar">Ingresar</button>';
+  } else {
+    var nombreCiudad = co==="REG" ? REGIONAL.nombre : (ciudadPorCo(co)||{nombre:co}).nombre;
+    var lista = usuarios.filter(function(u){ return u.co===co && u.activo!==false; })
+      .sort(function(a,b){ return rolOrden(a.rol)-rolOrden(b.rol) || String(a.nombre).localeCompare(String(b.nombre)); });
+    cuerpo = '<button class="btn ghost sm" id="loginBack" style="margin-bottom:8px;">← Cambiar ciudad</button>'+
+      '<p class="eyebrow">'+esc(nombreCiudad)+(co!=="REG"?" · C.O. "+co:"")+'</p>'+
+      '<p class="hint" style="margin-bottom:10px;">Toca tu nombre para ingresar.</p>'+
+      (lista.length ? lista.map(function(u){
+        return '<div class="item-row" data-uid="'+esc(u.id)+'"><div class="ico">👤</div><div class="info"><div class="t">'+esc(u.nombre)+'</div><div class="m">'+esc(u.cargo||ROL_LABEL[u.rol]||"")+'</div></div><span class="pill neutral">'+esc(ROL_LABEL[u.rol]||u.rol)+'</span></div>';
+      }).join("") : '<div class="card empty">Todavía no hay usuarios en esta ciudad. Pide al administrador que los registre.</div>');
+  }
   root.innerHTML =
   '<div class="login-shell"><div class="login-card card" style="position:relative;">'+
     '<button id="themeToggle" title="Cambiar apariencia" style="position:absolute;top:20px;right:20px;">'+(getTheme()==="dark"?"☀️":"🌙")+'</button>'+
     '<div class="mark-big">'+iconSemaforo()+'</div>'+
     '<div style="margin-bottom:8px;">'+renderSyncBadge()+'</div>'+
-    '<p class="eyebrow">Prototipo · acceso simulado M365</p>'+
-    '<h1 style="font-size:24px;margin-bottom:6px;">Semáforos de Vencimiento</h1>'+
-    '<p class="hint" style="margin-bottom:18px;">Ingresa con tu correo corporativo. En este prototipo el inicio de sesión de Microsoft 365 se simula con tu correo; en producción se validaría con Azure AD.</p>'+
-    '<div class="field"><label>Correo corporativo</label>'+
-      (activos.length?'<select id="loginSel"><option value="">Selecciona tu correo…</option>'+
-        activos.map(function(u){ return '<option value="'+esc(u.email)+'"'+(selValue===u.email?" selected":"")+'>'+esc((u.nombre?u.nombre+" — ":"")+u.email)+'</option>'; }).join("")+
-        '<option value="__otro__"'+(selValue==="__otro__"?" selected":"")+'>Escribir otro correo…</option></select>':'')+
-      (mostrarInput?'<input id="loginEmail" placeholder="nombre.apellido@ejemplo.com" value="'+esc(state._loginEmail||"")+'"'+(activos.length?' style="margin-top:8px;"':'')+'>':'')+
-    '</div>'+
-    '<div class="field"><label>Ingresas como</label>'+
-      '<div class="role-choice">'+
-        '<div class="role-btn '+(role==="coordinador"?"sel":"")+'" data-role="coordinador"><b>Coordinador</b><span>Carga y asigna</span></div>'+
-        '<div class="role-btn '+(role==="operario"?"sel":"")+'" data-role="operario"><b>Operario</b><span>Cuenta y registra</span></div>'+
-        '<div class="role-btn '+(role==="administrador"?"sel":"")+'" data-role="administrador"><b>Admin</b><span>Gestiona usuarios</span></div>'+
-      '</div>'+
-      '<p class="hint">Coordinador y Operario siguen abiertos para cualquiera mientras terminamos de definir permisos. Admin sí valida: el primero en entrar como Admin queda registrado automáticamente; los siguientes deben ser agregados por un administrador ya existente.</p>'+
-    '</div>'+
-    '<button class="btn primary block" id="loginGo">Ingresar</button>'+
+    '<p class="eyebrow">Pruebas · Eje Cafetero</p>'+
+    '<h1 style="font-size:24px;margin-bottom:12px;">Semáforos de Vencimiento</h1>'+
+    cuerpo+
   '</div></div>';
 
-  root.querySelectorAll(".role-btn").forEach(function(b){
-    b.onclick = function(){ state._loginRole = b.getAttribute("data-role"); render(); };
-  });
   root.querySelector("#themeToggle").onclick = toggleTheme;
-  var selEl = root.querySelector("#loginSel");
-  if(selEl) selEl.onchange = function(){
-    var v = selEl.value;
-    if(v==="__otro__"){ state._loginOtro = true; state._loginEmail = ""; }
-    else {
-      state._loginOtro = false; state._loginEmail = v;
-      var u = activos.find(function(x){ return x.email===v; });
-      if(u) state._loginRole = u.rol;
-    }
-    render();
+  root.querySelectorAll("[data-co]").forEach(function(b){ b.onclick = function(){ state._loginCo = b.getAttribute("data-co"); render(); }; });
+  var back = root.querySelector("#loginBack"); if(back) back.onclick = function(){ state._loginCo = null; render(); };
+  root.querySelectorAll("[data-uid]").forEach(function(r){
+    r.onclick = function(){
+      var u = usuarios.filter(function(x){ return x.id===r.getAttribute("data-uid"); })[0];
+      if(u) loginComo(u);
+    };
+  });
+  var adm = root.querySelector("#admEntrar");
+  if(adm){
+    var intentar = async function(){
+      var user = root.querySelector("#admUser").value.trim(), pass = root.querySelector("#admPass").value;
+      if(!user || !pass){ await notify("Escribe tu usuario y tu clave."); return; }
+      var ok = false;
+      try{ ok = await Store.verificarClave(user, pass); }
+      catch(err){ await notify("No se pudo verificar la clave: "+(err&&err.message?err.message:err)); return; }
+      var u = ok ? usuarios.filter(function(x){ return x.rol==="administrador" && x.activo!==false && slugNombre(primerNombre(x.nombre))===slugNombre(user); })[0] : null;
+      if(!u){ await notify("Usuario o clave incorrectos."); return; }
+      loginComo(u);
+    };
+    adm.onclick = intentar;
+    root.querySelector("#admPass").onkeydown = function(e){ if(e.key==="Enter") intentar(); };
+  }
+  var go = root.querySelector("#setupGo");
+  if(go) go.onclick = async function(){
+    var nombre = root.querySelector("#setupNombre").value.trim();
+    if(!nombre){ await notify("Escribe tu nombre."); return; }
+    var u = {id:userId("REG",nombre), nombre:nombre, cargo:"Líder logístico regional", co:"REG", ciudad:REGIONAL.nombre, rol:"administrador", activo:true};
+    try{ await Store.upsertUsuario(u.id, u); loginComo(u); }
+    catch(err){ await notify("No se pudo crear el administrador: "+(err&&err.message?err.message:err)); }
   };
-  root.querySelector("#loginGo").onclick = async function(){
-    var inp = root.querySelector("#loginEmail");
-    var email = (inp ? inp.value : (state._loginEmail||"")).trim();
-    if(!email || !state._loginRole){ await notify("Escribe tu correo corporativo y elige un rol."); return; }
-    var emailKey = email.toLowerCase();
-    var registrado = (state.usuarios||[]).find(function(u){ return u.email===emailKey; });
-    var rolFinal = state._loginRole;
-
-    if(registrado){
-      if(registrado.activo===false){ await notify("Tu cuenta fue desactivada por un administrador de la app. Contáctalo si crees que es un error."); return; }
-      rolFinal = registrado.rol;
-    } else if(state._loginRole==="administrador"){
-      var hayAdminActivo = (state.usuarios||[]).some(function(u){ return u.rol==="administrador" && u.activo!==false; });
-      if(!hayAdminActivo){
-        await Store.upsertUsuario(emailKey, {nombre:deriveNombreFromEmail(emailKey), rol:"administrador", activo:true});
-      } else {
-        await notify('Tu correo no está registrado como administrador. Pide a un administrador existente que te agregue desde el "Panel de administración".');
-        return;
-      }
-    }
-
-    var nombreFinal = registrado&&registrado.nombre ? registrado.nombre : deriveNombreFromEmail(emailKey);
-    var identity = {nombre:nombreFinal, email:emailKey, rol:rolFinal};
-    setIdentity(identity);
-    setState({identity:identity, view: rolFinal==="operario"?"home":"list"});
-  };
-  var emailEl = root.querySelector("#loginEmail");
-  if(emailEl) emailEl.oninput = function(e){ state._loginEmail = e.target.value; };
 }
 
 /* ================= topbar ================= */
@@ -766,9 +826,10 @@ function renderSyncBadge(){
   return '<span class="pill neutral dot" title="Conectando...">Conectando…</span>';
 }
 function renderTopbar(){
+  var id = state.identity;
   return '<div class="topbar">'+
-    '<div class="brand"><div class="mark">'+iconSemaforo()+'</div><div><b>Semáforos</b><div class="sub">PROTOTIPO · DATOS DE PRUEBA</div></div></div>'+
-    '<div class="who">'+renderSyncBadge()+'<span>'+({administrador:"Administrador",coordinador:"Coordinador",operario:"Operario"}[state.identity.rol]||state.identity.rol)+' — <span class="name">'+esc(state.identity.nombre)+'</span></span>'+
+    '<div class="brand"><div class="mark">'+iconSemaforo()+'</div><div><b>Semáforos</b><div class="sub">PRUEBAS · EJE CAFETERO</div></div></div>'+
+    '<div class="who">'+renderSyncBadge()+'<span>'+esc(ROL_LABEL[id.rol]||id.rol)+(id.rol!=="administrador"&&id.ciudad?" · "+esc(id.ciudad):"")+' — <span class="name">'+esc(id.nombre)+'</span></span>'+
       '<button id="themeToggle" title="Cambiar apariencia">'+(getTheme()==="dark"?"☀️":"🌙")+'</button>'+
       '<button id="logoutBtn">Salir</button></div>'+
   '</div>';
@@ -777,7 +838,7 @@ function wireTopbar(){
   var b = root.querySelector("#logoutBtn");
   if(b) b.onclick = function(){
     clearIdentity();
-    state._loginEmail = ""; state._loginRole = null; state._loginOtro = false;
+    state._loginCo = coDesdeUrl(); state._ix = null; state._filtroCiudad = "";
     if(state.unsubItems) state.unsubItems();
     setState({identity:null, currentCargaId:null, items:[], unsubItems:null, view:"list"});
   };
@@ -785,140 +846,262 @@ function wireTopbar(){
   if(t) t.onclick = toggleTheme;
 }
 
-/* ================= administrador: gestión de usuarios ================= */
-var ROL_LABEL = {administrador:"Administrador", coordinador:"Coordinador", operario:"Operario"};
+/* ================= administrador ================= */
+function renderAdminNav(active){
+  return '<div class="tabs">'+
+    '<button data-nav="consolidado" class="'+(active==="consolidado"?"active":"")+'">Informe consolidado</button>'+
+    '<button data-nav="cargas" class="'+(active==="cargas"?"active":"")+'">Cargas por ciudad</button>'+
+    '<button data-nav="usuarios" class="'+(active==="usuarios"?"active":"")+'">Usuarios</button>'+
+  '</div>';
+}
+function wireAdminNav(){
+  root.querySelectorAll("[data-nav]").forEach(function(b){
+    b.onclick = function(){ state.adminTab = b.getAttribute("data-nav"); state.view = "list"; render(); };
+  });
+}
+
+/* Importa el listado de personal desde un Excel (columnas: C.O, Operación, Nombres, Cargo).
+   Lo ejecuta el administrador; solo agrega usuarios nuevos, no toca los existentes. */
+function tituloNombre(s){ return String(s||"").trim().toLowerCase().replace(/(^|\s)\S/g, function(c){ return c.toUpperCase(); }); }
+function rolPorCargo(cargo){
+  var c = String(cargo||"").toUpperCase();
+  if(c.indexOf("LIDER")>-1 || c.indexOf("LÍDER")>-1) return "administrador";
+  if(c.indexOf("COORDINADOR")>-1 || c.indexOf("SUPERVISOR")>-1) return "coordinador";
+  return "operario";
+}
+function showImportUsuarios(existentes){
+  var m = document.createElement("div");
+  m.className = "modal-bg";
+  m.innerHTML = '<div class="modal" style="max-width:640px;">'+
+    '<div class="modal-head"><h2 style="font-size:17px;">Importar usuarios desde Excel</h2><button id="imClose">×</button></div>'+
+    '<p class="hint" style="margin-bottom:10px;">El archivo debe tener las columnas <b>C.O</b>, <b>Operación</b>, <b>Nombres</b> y <b>Cargo</b>. El rol se deduce del cargo: Auxiliar → auxiliar de bodega; Coordinador o Supervisor → coordinador/supervisor; Líder → administrador. Se agregan solo los usuarios que no existan; revisa la vista previa antes de confirmar.</p>'+
+    '<div class="field"><input type="file" id="imFile" accept=".xlsx,.xls"></div>'+
+    '<div id="imPreview" style="max-height:320px;overflow:auto;"></div>'+
+    '<button class="btn primary block" id="imOk" disabled style="margin-top:12px;">Importar</button>'+
+  '</div>';
+  document.body.appendChild(m);
+  var nuevos = [];
+  m.querySelector("#imClose").onclick = function(){ m.remove(); };
+  m.onclick = function(e){ if(e.target===m) m.remove(); };
+  m.querySelector("#imFile").onchange = function(e){
+    var f = e.target.files[0]; if(!f) return;
+    var reader = new FileReader();
+    reader.onload = function(ev){
+      var box = m.querySelector("#imPreview");
+      try{
+        var wb = XLSX.read(ev.target.result, {type:"array"});
+        var rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], {defval:""});
+        var ids = {}; existentes.forEach(function(u){ ids[u.id] = true; });
+        var lista = [];
+        rows.forEach(function(r){
+          var coRaw = String(r["C.O"]!==undefined ? r["C.O"] : r["C.O."]).trim();
+          var co = /^\d+$/.test(coRaw) ? ("000"+coRaw).slice(-3) : (coRaw.toLowerCase()==="regional" ? "REG" : coRaw);
+          var nombre = tituloNombre(r["Nombres"]);
+          if(!nombre || !(co==="REG" || ciudadPorCo(co))) return;
+          var ciudad = co==="REG" ? REGIONAL.nombre : ciudadPorCo(co).nombre;
+          var cargo = String(r["Cargo"]||"").trim(); cargo = cargo.charAt(0).toUpperCase()+cargo.slice(1).toLowerCase();
+          var id = userId(co, nombre);
+          lista.push({id:id, nombre:nombre, cargo:cargo, co:co, ciudad:ciudad, rol:rolPorCargo(r["Cargo"]), activo:true, existe:!!ids[id]});
+        });
+        nuevos = lista.filter(function(u){ return !u.existe; });
+        box.innerHTML = lista.length ? '<table><thead><tr><th>Nombre</th><th>Ciudad</th><th>Cargo</th><th>Rol</th><th></th></tr></thead><tbody>'+
+          lista.map(function(u){ return '<tr><td>'+esc(u.nombre)+'</td><td>'+esc(u.ciudad)+'</td><td>'+esc(u.cargo)+'</td><td>'+esc(ROL_LABEL[u.rol])+'</td><td>'+(u.existe?'<span class="pill neutral">Ya existe</span>':'<span class="pill green">Nuevo</span>')+'</td></tr>'; }).join("")+'</tbody></table>'
+          : '<p class="hint">No se encontraron filas válidas. Revisa los nombres de las columnas.</p>';
+        var btn = m.querySelector("#imOk"); btn.disabled = !nuevos.length; btn.textContent = nuevos.length ? "Importar "+nuevos.length+" usuarios nuevos" : "No hay usuarios nuevos";
+      }catch(err){ box.innerHTML = '<p style="color:var(--danger);">No se pudo leer el archivo: '+esc(err.message||err)+'</p>'; }
+    };
+    reader.readAsArrayBuffer(f);
+  };
+  m.querySelector("#imOk").onclick = async function(){
+    try{
+      for(var i=0;i<nuevos.length;i++){ var u = nuevos[i]; var id = u.id; var d = Object.assign({}, u); delete d.id; delete d.existe; await Store.upsertUsuario(id, d); }
+      m.remove(); await notify("Se importaron "+nuevos.length+" usuarios."); render();
+    }catch(err){ await notify("No se pudo importar: "+(err&&err.message?err.message:err)); }
+  };
+}
+
+/* Informe consolidado: junta los lotes de todas las cargas (todas las ciudades) y reutiliza el informe de semáforo. */
+async function cargarConsolidado(){
+  state._consol = Object.assign({items:null}, state._consol, {cargando:true});
+  var all = [];
+  try{
+    for(var i=0;i<state.cargas.length;i++){
+      var c = state.cargas[i], items = await Store.getItems(c.id);
+      items.forEach(function(it){ it._ciudad = c.ciudad||"Sin ciudad"; });
+      all = all.concat(items);
+    }
+    state._consol = {items:all, cargando:false, ts:Date.now()};
+  }catch(err){
+    state._consol = {items:state._consol.items||[], cargando:false, error:(err&&err.message?err.message:String(err)), ts:Date.now()};
+  }
+  if(state.identity && state.identity.rol==="administrador" && state.adminTab==="consolidado" && state.view!=="detail") render();
+}
+var consolTimer = null;
+function renderConsolidado(){
+  var C = state._consol;
+  if(!C){ state._consol = {items:null, cargando:true}; cargarConsolidado(); C = state._consol; }
+  if(!consolTimer){
+    consolTimer = setInterval(function(){
+      if(state.identity && state.identity.rol==="administrador" && state.adminTab==="consolidado" && state.view!=="detail" && !(state._consol&&state._consol.cargando)) cargarConsolidado();
+    }, 20000);
+  }
+  var html = renderTopbar() + '<div class="wrap">' + renderAdminNav("consolidado");
+  html += '<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:14px;flex-wrap:wrap;">'+
+    '<div><p class="eyebrow">Líder logístico regional</p><h1 style="font-size:22px;">Informe consolidado · Eje Cafetero</h1>'+
+    '<p class="hint">'+(C.ts?'Actualizado a las '+new Date(C.ts).toLocaleTimeString("es-CO",{hour:"2-digit",minute:"2-digit"})+' · se refresca solo cada 20 s':'Cargando…')+(C.error?' · <span style="color:var(--danger);">'+esc(C.error)+'</span>':'')+'</p></div>'+
+    '<div style="display:flex;gap:8px;"><button class="btn sm" id="btnRefrescar">'+(C.cargando?"Actualizando…":"Actualizar")+'</button><button class="btn sm" id="btnExcelConsol"'+(C.items?"":" disabled")+'>Descargar Excel</button></div>'+
+  '</div>';
+  html += C.items ? renderIndicadoresTab(C.items, {consolidado:true}) : '<div class="card empty">Cargando información de todas las ciudades…</div>';
+  html += '</div>';
+  root.innerHTML = html;
+  wireTopbar(); wireAdminNav(); wireIndicadoresTab();
+  root.querySelector("#btnRefrescar").onclick = function(){ if(!(state._consol&&state._consol.cargando)) cargarConsolidado(); };
+  root.querySelector("#btnExcelConsol").onclick = function(){
+    var ref = (state._ix && state._ix.ref) || todayISO(), items = (state._consol&&state._consol.items)||[];
+    var lotes = filasLotes(items, {}, ref);
+    descargarExcel([
+      {nombre:"Resumen por ciudad", filas:filasResumenCiudad(lotes)},
+      {nombre:"Lotes", filas:lotes},
+      {nombre:"Cruce de cantidades", filas:filasCruce(items, {})}
+    ], "Semaforo Eje Cafetero "+ref+".xlsx");
+  };
+}
+
 function renderAdminPanel(){
-  var usuarios = state.usuarios||[];
-  var html = renderTopbar() + '<div class="wrap">';
-  html += '<p class="eyebrow">Panel de administración</p><h1 style="font-size:22px;margin-bottom:16px;">Gestión de usuarios</h1>';
+  var usuarios = (state.usuarios||[]).slice().sort(function(a,b){
+    return String(a.co).localeCompare(String(b.co)) || rolOrden(a.rol)-rolOrden(b.rol) || String(a.nombre).localeCompare(String(b.nombre));
+  });
+  var editing = state._admEditing ? usuarios.filter(function(u){ return u.id===state._admEditing; })[0] : null;
+  var html = renderTopbar() + '<div class="wrap">' + renderAdminNav("usuarios");
+  html += '<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:16px;">'+
+    '<div><p class="eyebrow">Panel de administración</p><h1 style="font-size:22px;">Gestión de usuarios</h1></div>'+
+    '<button class="btn" id="admImportar">Importar usuarios desde Excel</button></div>';
 
   html += '<div class="grid-stats">'+
     '<div class="stat"><div class="n">'+usuarios.length+'</div><div class="l">Usuarios registrados</div></div>'+
     '<div class="stat"><div class="n">'+usuarios.filter(function(u){return u.activo!==false;}).length+'</div><div class="l">Activos</div></div>'+
-    '<div class="stat"><div class="n">'+usuarios.filter(function(u){return u.rol==="administrador";}).length+'</div><div class="l">Administradores</div></div>'+
+    '<div class="stat"><div class="n">'+usuarios.filter(function(u){return u.rol==="coordinador";}).length+'</div><div class="l">Coordinadores / Supervisores</div></div>'+
+    '<div class="stat"><div class="n">'+usuarios.filter(function(u){return u.rol==="operario";}).length+'</div><div class="l">Auxiliares</div></div>'+
   '</div>';
 
-  var editing = state._admEditing ? usuarios.find(function(u){ return u.email===state._admEditing; }) : null;
+  function opt(v, label, sel){ return '<option value="'+esc(v)+'"'+(sel?" selected":"")+'>'+esc(label)+'</option>'; }
   html += '<div class="card" style="margin-bottom:16px;">'+
     '<h3 style="font-size:15px;margin-bottom:12px;">'+(editing?"Editar usuario":"Agregar usuario")+'</h3>'+
     '<div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;">'+
-      '<div class="field" style="flex:1;min-width:160px;margin-bottom:0;"><label>Nombre</label><input id="admNombre" placeholder="Nombre completo" value="'+esc(editing?editing.nombre:"")+'"></div>'+
-      '<div class="field" style="flex:1;min-width:200px;margin-bottom:0;"><label>Correo corporativo</label><input id="admEmail" placeholder="nombre.apellido@ejemplo.com" value="'+esc(editing?editing.email:"")+'" '+(editing?"disabled":"")+'></div>'+
-      '<div class="field" style="min-width:160px;margin-bottom:0;"><label>Rol</label><select id="admRol">'+
-        '<option value="operario"'+(editing&&editing.rol==="operario"?" selected":"")+'>Operario</option>'+
-        '<option value="coordinador"'+(editing&&editing.rol==="coordinador"?" selected":"")+'>Coordinador</option>'+
-        '<option value="administrador"'+(editing&&editing.rol==="administrador"?" selected":"")+'>Administrador</option>'+
+      '<div class="field" style="flex:2;min-width:200px;margin-bottom:0;"><label>Nombre completo</label><input id="admNombre" placeholder="Nombre y apellidos" value="'+esc(editing?editing.nombre:"")+'"></div>'+
+      '<div class="field" style="flex:2;min-width:180px;margin-bottom:0;"><label>Cargo</label><input id="admCargo" placeholder="Ej: Auxiliar logístico" value="'+esc(editing?editing.cargo||"":"")+'"></div>'+
+      '<div class="field" style="min-width:150px;margin-bottom:0;"><label>Ciudad / C.O.</label><select id="admCo">'+
+        CIUDADES.map(function(c){ return opt(c.co, c.nombre+" · "+c.co, editing && editing.co===c.co); }).join("")+
+        opt("REG", "Regional (Eje Cafetero)", editing && editing.co==="REG")+
+      '</select></div>'+
+      '<div class="field" style="min-width:190px;margin-bottom:0;"><label>Rol</label><select id="admRol">'+
+        ["operario","coordinador","administrador"].map(function(r){ return opt(r, ROL_LABEL[r], editing && editing.rol===r); }).join("")+
       '</select></div>'+
       '<button class="btn primary" id="admGuardar">'+(editing?"Actualizar":"Guardar")+'</button>'+
       (editing?'<button class="btn" id="admCancelar">Cancelar</button>':"")+
     '</div>'+
-    '<p class="hint" style="margin-top:8px;">'+(editing?'Editando "'+esc(editing.email)+'". El correo no se puede cambiar porque identifica al usuario.':'Si el correo ya existe, esto actualiza su nombre y su rol en vez de crear un usuario duplicado.')+'</p>'+
+    '<p class="hint" style="margin-top:8px;">Los coordinadores/supervisores cargan y asignan en su ciudad; los auxiliares ejecutan el conteo; el administrador ve todas las ciudades.</p>'+
   '</div>';
 
   html += '<div class="card" style="padding:0;"><div class="tablewrap"><table><thead><tr>'+
-    '<th>Nombre</th><th>Correo</th><th>Rol</th><th>Estado</th><th></th>'+
+    '<th>Nombre</th><th>Ciudad</th><th>Cargo</th><th>Rol</th><th>Estado</th><th></th>'+
   '</tr></thead><tbody>';
   if(!usuarios.length){
-    html += '<tr><td colspan="5" style="text-align:center;color:var(--muted);padding:24px;">Aún no hay usuarios registrados — el primer administrador se crea automáticamente al ingresar por primera vez con el rol "Admin".</td></tr>';
+    html += '<tr><td colspan="6" style="text-align:center;color:var(--muted);padding:24px;">Aún no hay usuarios registrados.</td></tr>';
   }
   usuarios.forEach(function(u){
     var activo = u.activo!==false;
     html += '<tr>'+
-      '<td>'+esc(u.nombre||"—")+(u.email===state.identity.email?' <span class="hint">(tú)</span>':"")+'</td>'+
-      '<td class="mono">'+esc(u.email)+'</td>'+
+      '<td>'+esc(u.nombre||"—")+(u.id===state.identity.id?' <span class="hint">(tú)</span>':"")+'</td>'+
+      '<td>'+esc(u.ciudad||"—")+' <span class="hint mono">'+esc(u.co||"")+'</span></td>'+
+      '<td>'+esc(u.cargo||"—")+'</td>'+
       '<td>'+esc(ROL_LABEL[u.rol]||u.rol)+'</td>'+
       '<td>'+(activo?'<span class="pill green dot">Activo</span>':'<span class="pill neutral dot">Inactivo</span>')+'</td>'+
       '<td style="white-space:nowrap;">'+
-        '<button class="btn sm" data-edit="'+esc(u.email)+'">Editar</button> '+
-        '<button class="btn sm" data-toggle="'+esc(u.email)+'" data-activo="'+activo+'">'+(activo?"Desactivar":"Activar")+'</button> '+
-        '<button class="btn sm danger" data-del="'+esc(u.email)+'">Eliminar</button>'+
+        '<button class="btn sm" data-edit="'+esc(u.id)+'">Editar</button> '+
+        '<button class="btn sm" data-toggle="'+esc(u.id)+'" data-activo="'+activo+'">'+(activo?"Desactivar":"Activar")+'</button> '+
+        '<button class="btn sm danger" data-del="'+esc(u.id)+'">Eliminar</button>'+
       '</td>'+
     '</tr>';
   });
-  html += '</tbody></table></div></div>';
-  html += '</div>';
+  html += '</tbody></table></div></div></div>';
   root.innerHTML = html;
-  wireTopbar();
+  wireTopbar(); wireAdminNav();
+  root.querySelector("#admImportar").onclick = function(){ showImportUsuarios(usuarios); };
 
   root.querySelector("#admGuardar").onclick = async function(){
     var nombre = root.querySelector("#admNombre").value.trim();
-    var email = (editing?editing.email:root.querySelector("#admEmail").value.trim().toLowerCase());
+    var cargo = root.querySelector("#admCargo").value.trim();
+    var co = root.querySelector("#admCo").value;
     var rol = root.querySelector("#admRol").value;
-    if(!nombre || !email){ await notify("Escribe nombre y correo."); return; }
+    if(!nombre){ await notify("Escribe el nombre completo."); return; }
+    var ciudadNombre = co==="REG" ? REGIONAL.nombre : ciudadPorCo(co).nombre;
+    var id = editing ? editing.id : userId(co, nombre);
+    if(!editing && usuarios.some(function(u){ return u.id===id; })){ await notify("Ya existe un usuario con ese nombre en esa ciudad."); return; }
     try{
-      await Store.upsertUsuario(email, {nombre:nombre, rol:rol, activo: editing?editing.activo!==false:true});
-      state._admEditing = null;
-      render();
-    }catch(err){
-      await notify("No se pudo guardar el usuario: "+(err&&err.message?err.message:err));
-    }
+      await Store.upsertUsuario(id, {nombre:nombre, cargo:cargo, co:co, ciudad:ciudadNombre, rol:rol, activo: editing?editing.activo!==false:true});
+      state._admEditing = null; render();
+    }catch(err){ await notify("No se pudo guardar el usuario: "+(err&&err.message?err.message:err)); }
   };
-  if(editing){
-    root.querySelector("#admCancelar").onclick = function(){ state._admEditing = null; render(); };
-  }
-  root.querySelectorAll("[data-edit]").forEach(function(b){
-    b.onclick = function(){ state._admEditing = b.getAttribute("data-edit"); render(); };
-  });
+  if(editing){ root.querySelector("#admCancelar").onclick = function(){ state._admEditing = null; render(); }; }
+  root.querySelectorAll("[data-edit]").forEach(function(b){ b.onclick = function(){ state._admEditing = b.getAttribute("data-edit"); render(); }; });
   root.querySelectorAll("[data-toggle]").forEach(function(b){
     b.onclick = async function(){
-      var email = b.getAttribute("data-toggle");
-      var activo = b.getAttribute("data-activo")==="true";
-      if(email===state.identity.email && activo){ await notify("No puedes desactivar tu propia cuenta desde aquí."); return; }
-      try{
-        await Store.setUsuarioActivo(email, !activo);
-        render();
-      }catch(err){
-        await notify("No se pudo cambiar el estado del usuario: "+(err&&err.message?err.message:err));
-      }
+      var id = b.getAttribute("data-toggle"), activo = b.getAttribute("data-activo")==="true";
+      if(id===state.identity.id && activo){ await notify("No puedes desactivar tu propia cuenta desde aquí."); return; }
+      try{ await Store.setUsuarioActivo(id, !activo); render(); }
+      catch(err){ await notify("No se pudo cambiar el estado del usuario: "+(err&&err.message?err.message:err)); }
     };
   });
   root.querySelectorAll("[data-del]").forEach(function(b){
     b.onclick = async function(){
-      var email = b.getAttribute("data-del");
-      if(email===state.identity.email){ await notify("No puedes eliminar tu propia cuenta."); return; }
-      var ok = await askConfirm('¿Eliminar el usuario "'+email+'"? Esto no borra las cargas o registros que haya hecho, solo su acceso.');
+      var id = b.getAttribute("data-del");
+      if(id===state.identity.id){ await notify("No puedes eliminar tu propia cuenta."); return; }
+      var ok = await askConfirm('¿Eliminar a "'+nombreDe(id)+'"? Esto no borra lo que haya registrado, solo su acceso.');
       if(ok){
-        try{
-          await Store.deleteUsuario(email);
-          render();
-        }catch(err){
-          await notify("No se pudo eliminar el usuario: "+(err&&err.message?err.message:err));
-        }
+        try{ await Store.deleteUsuario(id); render(); }
+        catch(err){ await notify("No se pudo eliminar el usuario: "+(err&&err.message?err.message:err)); }
       }
     };
   });
 }
 
-/* ================= coordinador: cargas list ================= */
+/* ================= coordinador / administrador: cargas ================= */
 function renderCoordinadorList(){
+  var id = state.identity, esAdmin = id.rol==="administrador";
+  var cargas = cargasVisibles();
   var html = renderTopbar() + '<div class="wrap">';
+  if(esAdmin) html += renderAdminNav("cargas");
   html += '<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:16px;flex-wrap:wrap;">'+
-    '<div><p class="eyebrow">Cargas de referencias</p><h1 style="font-size:22px;">Selecciona o crea una carga</h1></div>'+
-    '<div style="display:flex;gap:8px;">'+
+    '<div><p class="eyebrow">Cargas de referencias · '+esc(esAdmin ? (state._filtroCiudad||"Todas las ciudades") : id.ciudad)+'</p><h1 style="font-size:22px;">Selecciona o crea una carga</h1></div>'+
+    '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">'+
+      (esAdmin ? '<select id="filtroCiudad" aria-label="Ciudad" style="padding:9px 12px;border:1.5px solid var(--border);border-radius:var(--radius-md);background:var(--surface);"><option value="">Todas las ciudades</option>'+
+        CIUDADES.map(function(c){ return '<option value="'+esc(c.nombre)+'"'+(state._filtroCiudad===c.nombre?" selected":"")+'>'+esc(c.nombre)+'</option>'; }).join("")+'</select>' : '')+
       '<button class="btn primary" id="btnUpload">Cargar archivo Excel</button>'+
     '</div>'+
   '</div>';
 
-  if(!state.cargas.length){
-    html += '<div class="card empty">Aún no hay cargas. Usa "Cargar archivo Excel" para crear una con tu archivo exportado de SIESA.</div>';
+  if(!cargas.length){
+    html += '<div class="card empty">Aún no hay cargas'+(esAdmin?"":" en "+esc(id.ciudad))+'. Usa "Cargar archivo Excel" para crear una con tu archivo exportado de SIESA.</div>';
   } else {
     html += '<div class="card" style="padding:0;overflow:hidden;">';
-    state.cargas.forEach(function(c, idx){
-      html += '<div class="carga-row" data-id="'+c.id+'" style="display:flex;align-items:center;justify-content:space-between;gap:12px;padding:16px 20px;cursor:pointer;'+(idx? 'border-top:1px solid var(--border);':'')+'">'+
-        '<div><div style="font-weight:600;">'+esc(c.bodegaDesc||"Carga")+' <span class="pill neutral" style="margin-left:6px;">'+esc(c.bodega||"")+'</span></div>'+
+    cargas.forEach(function(c, idx){
+      html += '<div class="carga-row" data-id="'+esc(c.id)+'" style="display:flex;align-items:center;justify-content:space-between;gap:12px;padding:16px 20px;cursor:pointer;'+(idx? 'border-top:1px solid var(--border);':'')+'">'+
+        '<div><div style="font-weight:600;">'+esc(c.bodegaDesc||"Carga")+' <span class="pill neutral" style="margin-left:6px;">'+esc(c.bodega||"")+'</span> <span class="pill '+(c.ciudad?"amber":"neutral")+'" style="margin-left:4px;">'+esc(c.ciudad||"Sin ciudad")+'</span></div>'+
         '<div class="hint">Creada por '+esc(c.creadoPor||"—")+' · '+(c.creadoEn?new Date(c.creadoEn).toLocaleString("es-CO"):"")+' · '+(c.totalItems||0)+' referencias</div></div>'+
         '<div style="display:flex;gap:8px;flex:0 0 auto;">'+
-          '<button class="btn sm" data-open="'+c.id+'">Abrir →</button>'+
-          '<button class="btn sm danger" data-del="'+c.id+'" title="Eliminar carga">🗑</button>'+
+          '<button class="btn sm" data-open="'+esc(c.id)+'">Abrir →</button>'+
+          '<button class="btn sm danger" data-del="'+esc(c.id)+'" title="Eliminar carga">🗑</button>'+
         '</div>'+
       '</div>';
     });
     html += '</div>';
   }
-  html += '<p class="footer-note">Acceso desde dispositivo del operario: comparte esta misma URL o el código QR desde dentro de una carga.</p>';
+  html += '<p class="footer-note">Los auxiliares ingresan con este mismo enlace o con el código QR (se abre desde dentro de una carga), eligiendo su ciudad y su nombre.</p>';
   html += '</div>';
   root.innerHTML = html;
-  wireTopbar();
+  wireTopbar(); if(esAdmin) wireAdminNav();
+  var fc = root.querySelector("#filtroCiudad"); if(fc) fc.onchange = function(e){ state._filtroCiudad = e.target.value; render(); };
 
   root.querySelectorAll(".carga-row").forEach(function(r){
     r.onclick = function(e){ if(e.target.closest("[data-del]")) return; openCarga(r.getAttribute("data-id")); };
@@ -926,11 +1109,11 @@ function renderCoordinadorList(){
   root.querySelectorAll("[data-del]").forEach(function(b){
     b.onclick = async function(e){
       e.stopPropagation();
-      var id = b.getAttribute("data-del");
-      var c = state.cargas.find(function(x){return x.id===id;});
-      var ok = await askConfirm('¿Eliminar la carga "'+(c?c.bodegaDesc:id)+'"? Se borrarán sus referencias, asignaciones y registros capturados. Esta acción no se puede deshacer.');
+      var cid = b.getAttribute("data-del");
+      var c = state.cargas.find(function(x){return x.id===cid;});
+      var ok = await askConfirm('¿Eliminar la carga "'+(c?c.bodegaDesc:cid)+'"? Se borrarán sus referencias, asignaciones y registros capturados. Esta acción no se puede deshacer.');
       if(ok){
-        await Store.deleteCarga(id);
+        await Store.deleteCarga(cid);
       }
     };
   });
@@ -938,17 +1121,31 @@ function renderCoordinadorList(){
 }
 
 function showUploadModal(){
+  var idn = state.identity, esAdmin = idn.rol==="administrador";
   var m = document.createElement("div");
   m.className = "modal-bg";
   m.innerHTML = '<div class="modal">'+
     '<div class="modal-head"><h2 style="font-size:17px;">Cargar archivo de SIESA</h2><button id="mClose">×</button></div>'+
-    '<p class="hint" style="margin-bottom:12px;">Selecciona el Excel exportado de SIESA (opción "cantidades en unidades de empaque"). Se leen las columnas: Bodega, Desc. bodega, Referencia, Desc. item, U.M., Factor U.M., Existencia, GRUPO SHOPPER, LINEA PROVEEDOR, MARCA, Código barra principal, Costo prom. unit./tot., Calidad Perecedero. Si el archivo trae una columna opcional <b>"Asignar a"</b> diligenciada con el <b>correo</b> del operario, esa asignación se precarga automáticamente (igual podrás ajustarla luego).</p>'+
+    (esAdmin
+      ? '<div class="field"><label>Ciudad de la carga</label><select id="upCiudad">'+CIUDADES.map(function(c){ return '<option value="'+esc(c.nombre)+'"'+(state._filtroCiudad===c.nombre?" selected":"")+'>'+esc(c.nombre)+' · C.O. '+c.co+'</option>'; }).join("")+'</select></div>'
+      : '<p class="hint" style="margin-bottom:8px;">La carga quedará en <b>'+esc(idn.ciudad)+'</b>. Solo los usuarios de esa ciudad (y el administrador) la verán.</p>')+
+    '<p class="hint" style="margin-bottom:12px;">Selecciona el Excel exportado de SIESA (opción "cantidades en unidades de empaque"). Se leen las columnas: Bodega, Desc. bodega, Referencia, Desc. item, U.M., Factor U.M., Existencia, GRUPO SHOPPER, LINEA PROVEEDOR, MARCA, Código barra principal, Costo prom. unit./tot., Calidad Perecedero. Si el archivo trae una columna opcional <b>"Asignar a"</b> con el <b>nombre</b> del auxiliar, esa asignación se precarga cuando coincide con un usuario de la ciudad (igual podrás ajustarla luego).</p>'+
     '<div class="field"><input type="file" id="fileInput" accept=".xlsx,.xls"></div>'+
     '<div class="field" id="fileStatus" style="font-size:13px;color:var(--muted);"></div>'+
     '<button class="btn primary block" id="mConfirm" disabled>Crear carga</button>'+
   '</div>';
   document.body.appendChild(m);
   var parsed = null;
+  function ciudadElegida(){ var s = m.querySelector("#upCiudad"); return s ? s.value : idn.ciudad; }
+  /* "Asignar a" del Excel -> id de usuario auxiliar de la ciudad (nombre completo o primer nombre único) */
+  function resolverAsignado(texto, ciudad){
+    var t = slugNombre(texto); if(!t) return null;
+    var aux = usuariosDeCiudad(ciudad, "operario");
+    var exact = aux.filter(function(u){ return slugNombre(u.nombre)===t; });
+    if(exact.length===1) return exact[0].id;
+    var porPrimer = aux.filter(function(u){ return slugNombre(primerNombre(u.nombre))===t; });
+    return porPrimer.length===1 ? porPrimer[0].id : null;
+  }
   m.querySelector("#mClose").onclick = function(){ m.remove(); };
   m.onclick = function(e){ if(e.target===m) m.remove(); };
   m.querySelector("#fileInput").onchange = function(e){
@@ -977,17 +1174,14 @@ function showUploadModal(){
             perecedero: String(r["Calidad Perecedero"]||"").trim().toLowerCase(),
             bodega: String(r["Bodega"]||"").trim(),
             bodegaDesc: String(r["Desc. bodega"]||"").trim(),
-            asignadoA: String(r["Asignar a"]||"").trim().toLowerCase() || null
+            asignarTexto: String(r["Asignar a"]||"").trim()
           };
         }).filter(function(x){ return x.referencia && x.perecedero==="si"; });
         if(!mapped.length){ status.innerHTML = '<span style="color:var(--danger);">No se encontraron filas con Calidad Perecedero = "si". Revisa el archivo.</span>'; return; }
         parsed = mapped;
-        var yaAsignadas = mapped.filter(function(x){ return x.asignadoA; });
-        var operariosDetectados = Array.from(new Set(yaAsignadas.map(function(x){ return x.asignadoA; })));
+        var conTexto = mapped.filter(function(x){ return x.asignarTexto; }).length;
         var msg = 'Listo: <b>'+mapped.length+'</b> referencias perecederas en bodega <b>'+esc(mapped[0].bodega)+' - '+esc(mapped[0].bodegaDesc)+'</b>.';
-        if(operariosDetectados.length){
-          msg += '<br>La columna "Asignar a" ya trae <b>'+yaAsignadas.length+'</b> de '+mapped.length+' referencias repartidas entre: <b>'+operariosDetectados.map(function(e){return esc(nombrePorEmail(e))+' ('+esc(e)+')';}).join(", ")+'</b>. Podrás ajustarlo después de crear la carga.';
-        }
+        if(conTexto) msg += '<br>La columna "Asignar a" trae '+conTexto+' filas; se asignarán las que coincidan con un auxiliar de la ciudad elegida.';
         status.innerHTML = msg;
         m.querySelector("#mConfirm").disabled = false;
       }catch(err){
@@ -998,11 +1192,22 @@ function showUploadModal(){
   };
   m.querySelector("#mConfirm").onclick = async function(){
     if(!parsed) return;
-    var operariosDesdeArchivo = Array.from(new Set(parsed.filter(function(x){return x.asignadoA;}).map(function(x){return x.asignadoA;})));
-    var meta = {bodega:parsed[0].bodega, bodegaDesc:parsed[0].bodegaDesc, creadoPor:state.identity.nombre, totalItems:parsed.length, operarios:operariosDesdeArchivo};
-    var id = await Store.createCarga(meta, parsed);
+    var ciudad = ciudadElegida(), c = ciudadPorNombre(ciudad);
+    var deBodega = ciudadPorBodega(parsed[0].bodega);
+    if(deBodega && deBodega.nombre!==ciudad){
+      var seguir = await askConfirm('La bodega '+parsed[0].bodega+' corresponde a '+deBodega.nombre+', pero la carga se está creando en '+ciudad+'. ¿Continuar de todos modos?');
+      if(!seguir) return;
+    }
+    var items = parsed.map(function(x){
+      var o = Object.assign({}, x); delete o.asignarTexto;
+      o.asignadoA = resolverAsignado(x.asignarTexto, ciudad);
+      return o;
+    });
+    var operarios = Array.from(new Set(items.filter(function(x){return x.asignadoA;}).map(function(x){return x.asignadoA;})));
+    var meta = {bodega:parsed[0].bodega, bodegaDesc:parsed[0].bodegaDesc, ciudad:ciudad, co:c?c.co:"", creadoPor:idn.nombre, creadoPorId:idn.id, totalItems:items.length, operarios:operarios};
+    var cid = await Store.createCarga(meta, items);
     m.remove();
-    openCarga(id);
+    openCarga(cid);
   };
 }
 
@@ -1028,6 +1233,7 @@ function renderCoordinadorDetail(){
   html += '<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:16px;">'+
     '<div><p class="eyebrow">'+esc(carga.bodega||"")+'</p><h1 style="font-size:22px;">'+esc(carga.bodegaDesc||"Carga")+'</h1></div>'+
     '<div style="display:flex;gap:8px;">'+
+      '<button class="btn sm" id="btnExcel">Descargar Excel</button>'+
       '<button class="btn sm" id="btnQr">Código QR de acceso</button>'+
       '<button class="btn sm danger" id="btnReset">Reiniciar</button>'+
       '<button class="btn sm danger" id="btnDeleteCarga">🗑 Eliminar carga</button>'+
@@ -1079,24 +1285,62 @@ function renderCoordinadorDetail(){
     }
   };
   root.querySelector("#btnQr").onclick = showQrModal;
+  root.querySelector("#btnExcel").onclick = function(){
+    var c = cargaActual(), ref = (state._ix && state._ix.ref) || todayISO();
+    descargarExcel([
+      {nombre:"Lotes", filas:filasLotes(state.items, c, ref)},
+      {nombre:"Cruce de cantidades", filas:filasCruce(state.items, c)}
+    ], "Semaforo "+(c.ciudad||"")+" "+(c.bodega||"")+" "+ref+".xlsx");
+  };
   root.querySelectorAll(".tabs button").forEach(function(b){ b.onclick = function(){ state._tab = b.getAttribute("data-tab"); render(); }; });
 
   wireAsignarTab();
   wireIndicadoresTab();
 }
 
+function cargaActual(){ return state.cargas.filter(function(c){ return c.id===state.currentCargaId; })[0] || {}; }
+function auxiliaresDeLaCarga(){
+  var c = cargaActual();
+  return usuariosDeCiudad(c.ciudad || state.identity.ciudad, "operario");
+}
+
+/* Modal para elegir uno o varios usuarios de una lista (reemplaza escribir correos). */
+function askPickUsers(titulo, lista){
+  return new Promise(function(resolve){
+    var m = document.createElement("div");
+    m.className = "modal-bg";
+    m.innerHTML = '<div class="modal" style="max-width:420px;">'+
+      '<div class="modal-head"><h2 style="font-size:17px;">'+esc(titulo)+'</h2><button id="pkClose">×</button></div>'+
+      (lista.length ? lista.map(function(u){
+        return '<label class="assign-check" style="padding:8px 4px;border-bottom:1px solid var(--border);cursor:pointer;"><input type="checkbox" value="'+esc(u.id)+'" checked> <span>'+esc(u.nombre)+'</span></label>';
+      }).join("") : '<p class="hint">No hay auxiliares registrados en esta ciudad.</p>')+
+      '<div style="display:flex;gap:10px;justify-content:flex-end;margin-top:14px;">'+
+        '<button class="btn" id="pkCancel">Cancelar</button><button class="btn primary" id="pkOk"'+(lista.length?"":" disabled")+'>Repartir</button>'+
+      '</div></div>';
+    document.body.appendChild(m);
+    function close(v){ m.remove(); resolve(v); }
+    m.querySelector("#pkClose").onclick = function(){ close(null); };
+    m.querySelector("#pkCancel").onclick = function(){ close(null); };
+    m.querySelector("#pkOk").onclick = function(){
+      close(Array.from(m.querySelectorAll("input:checked")).map(function(i){ return i.value; }));
+    };
+    m.onclick = function(e){ if(e.target===m) close(null); };
+  });
+}
+
 function renderAsignarTab(items, operarios){
-  var operariosRegistrados = (state.usuarios||[]).filter(function(u){ return u.rol==="operario" && u.activo!==false; }).map(function(u){ return u.email; });
-  var opciones = Array.from(new Set(operariosRegistrados.concat(operarios||[])));
+  var aux = auxiliaresDeLaCarga();
   var html = '<div class="card" style="margin-bottom:14px;">'+
     '<div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;">'+
-      '<div class="field" style="flex:1;min-width:180px;margin-bottom:0;"><label>Asignar seleccionadas a (correo)</label>'+
-        '<input id="opInput" list="opList" placeholder="correo.operario@ejemplo.com" value="'+esc(state.operarioInput||"")+'">'+
-        '<datalist id="opList">'+opciones.map(function(o){return '<option value="'+esc(o)+'">'+esc(nombrePorEmail(o))+'</option>';}).join("")+'</datalist>'+
-        (opciones.length?'':'<p class="hint">Aún no hay operarios registrados en el "Panel de administración". Puedes escribir el correo igual, pero se recomienda registrarlos primero.</p>')+
+      '<div class="field" style="flex:1;min-width:200px;margin-bottom:0;"><label>Asignar seleccionadas a</label>'+
+        '<select id="opSelect"><option value="">Elige un auxiliar…</option>'+
+          aux.map(function(u){ return '<option value="'+esc(u.id)+'"'+(state.operarioInput===u.id?" selected":"")+'>'+esc(u.nombre)+'</option>'; }).join("")+
+        '</select>'+
+        (aux.length?'':'<p class="hint">No hay auxiliares registrados en esta ciudad. El administrador debe crearlos en la pestaña "Usuarios".</p>')+
       '</div>'+
       '<button class="btn primary" id="btnAssign">Asignar</button>'+
       '<button class="btn" id="btnAutoAssign">Repartir equitativo</button>'+
+      '<button class="btn" id="btnSelAll">Seleccionar todas</button>'+
     '</div>'+
   '</div>';
 
@@ -1107,11 +1351,11 @@ function renderAsignarTab(items, operarios){
   items.forEach(function(it){
     var estPill = it.estado==="finalizado" ? '<span class="pill green dot">Finalizado</span>' : it.estado==="en_progreso" ? '<span class="pill amber dot">En progreso</span>' : '<span class="pill neutral dot">Pendiente</span>';
     html += '<tr>'+
-      '<td><input type="checkbox" class="rowchk" data-id="'+it.id+'" '+(state.selectedIds[it.id]?"checked":"")+'></td>'+
+      '<td><input type="checkbox" class="rowchk" data-id="'+esc(it.id)+'" '+(state.selectedIds[it.id]?"checked":"")+'></td>'+
       '<td class="mono">'+esc(it.referencia)+'</td>'+
       '<td>'+esc(it.descItem)+'</td>'+
       '<td style="max-width:180px;">'+esc((it.grupoShopper||"").split(" - ")[1]||it.grupoShopper||"")+'</td>'+
-      '<td>'+(it.asignadoA?(esc(nombrePorEmail(it.asignadoA))+'<div class="hint mono" style="font-size:11px;">'+esc(it.asignadoA)+'</div>'):'<span class="hint">sin asignar</span>')+'</td>'+
+      '<td>'+(it.asignadoA?esc(nombreDe(it.asignadoA)):'<span class="hint">sin asignar</span>')+'</td>'+
       '<td>'+estPill+'</td>'+
       '<td class="num">'+(it.registros?it.registros.length:0)+'</td>'+
     '</tr>';
@@ -1121,33 +1365,38 @@ function renderAsignarTab(items, operarios){
 }
 
 function wireAsignarTab(){
-  var opInputEl = root.querySelector("#opInput");
-  if(!opInputEl) return;
-  opInputEl.oninput = function(e){ state.operarioInput = e.target.value; };
+  var sel = root.querySelector("#opSelect");
+  if(!sel) return;
+  sel.onchange = function(e){ state.operarioInput = e.target.value; };
   root.querySelectorAll(".rowchk").forEach(function(c){
     c.onchange = function(){ state.selectedIds[c.getAttribute("data-id")] = c.checked; };
   });
+  root.querySelector("#btnSelAll").onclick = function(){
+    var todas = state.items.every(function(it){ return state.selectedIds[it.id]; });
+    state.items.forEach(function(it){ state.selectedIds[it.id] = !todas; });
+    render();
+  };
   root.querySelector("#btnAssign").onclick = async function(){
     var ids = Object.keys(state.selectedIds).filter(function(k){return state.selectedIds[k];});
-    var op = (state.operarioInput||"").trim().toLowerCase();
+    var op = state.operarioInput;
     if(!ids.length){ await notify("Selecciona al menos una referencia."); return; }
-    if(!op){ await notify("Escribe el correo del operario."); return; }
-    await Store.assignItems(state.currentCargaId, ids, op);
+    if(!op){ await notify("Elige el auxiliar al que se asignan."); return; }
+    try{ await Store.assignItems(state.currentCargaId, ids, op); }
+    catch(err){ await notify("No se pudo asignar: "+(err&&err.message?err.message:err)); return; }
     state.selectedIds = {}; state.operarioInput = ""; render();
   };
   root.querySelector("#btnAutoAssign").onclick = async function(){
-    var n = await askPrompt("¿Entre cuántos operarios se reparte?", "2");
-    n = parseInt(n,10);
-    if(!n || n<1) return;
-    var names = [];
-    for(var i=1;i<=n;i++){ var nm = await askPrompt("Correo del operario "+i); if(nm) names.push(nm.trim().toLowerCase()); }
-    if(!names.length) return;
+    var elegidos = await askPickUsers("Repartir las referencias sin asignar entre:", auxiliaresDeLaCarga());
+    if(!elegidos || !elegidos.length) return;
     var unassigned = state.items.filter(function(it){return !it.asignadoA;}).map(function(it){return it.id;});
-    var perOp = Math.ceil(unassigned.length/names.length);
-    for(var j=0;j<names.length;j++){
-      var slice = unassigned.slice(j*perOp,(j+1)*perOp);
-      if(slice.length) await Store.assignItems(state.currentCargaId, slice, names[j]);
-    }
+    if(!unassigned.length){ await notify("No hay referencias sin asignar."); return; }
+    var perOp = Math.ceil(unassigned.length/elegidos.length);
+    try{
+      for(var j=0;j<elegidos.length;j++){
+        var slice = unassigned.slice(j*perOp,(j+1)*perOp);
+        if(slice.length) await Store.assignItems(state.currentCargaId, slice, elegidos[j]);
+      }
+    }catch(err){ await notify("No se pudo repartir: "+(err&&err.message?err.message:err)); return; }
     render();
   };
 }
@@ -1189,7 +1438,7 @@ function ixLotes(items, ref){
     var cu = (it.costoUnit||0)/(it.factorUM||1); /* SIESA entrega el costo por empaque (caja): se lleva a costo por unidad */
     (it.registros||[]).forEach(function(r){
       var cant = Number(r.cantidad)||0, d = diasEntre(r.fechaVenc, ref);
-      out.push({cod:it.referencia, desc:it.descItem||"", linea:it.lineaProveedor||"Sin línea", cant:cant, fecha:r.fechaVenc, dias:d, banda:bandaDe(d), costo:cant*cu});
+      out.push({cod:it.referencia, desc:it.descItem||"", linea:it.lineaProveedor||"Sin línea", ciudad:it._ciudad||"", bodega:it.bodega||"", bdesc:it.bodegaDesc||"", cant:cant, fecha:r.fechaVenc, dias:d, banda:bandaDe(d), costo:cant*cu});
     });
   });
   return out;
@@ -1198,21 +1447,58 @@ function ixLotes(items, ref){
 function ixPill(banda){ var b = BANDA_POR_ID[banda]; return '<span class="pill '+b.cls+' dot">'+b.n+'</span>'; }
 function ixDiasTxt(d){ return d<0 ? "vencido hace "+(-d)+(d===-1?" día":" días") : d===0 ? "vence hoy" : "en "+d+(d===1?" día":" días"); }
 
-function renderIndicadoresTab(items){
-  var S = ix();
+function renderIndicadoresTab(items, opts){
+  var S = ix(), consol = !!(opts && opts.consolidado);
   var ref = S.ref || todayISO();
   var todos = ixLotes(items, ref);
   if(!todos.length){
-    return '<div class="card empty">Todavía no hay lotes registrados (cantidad + fecha de vencimiento) en esta carga. Este informe se llena a medida que los operarios van capturando información.</div>';
+    return '<div class="card empty">Todavía no hay lotes registrados (cantidad + fecha de vencimiento) '+(consol?'en ninguna ciudad':'en esta carga')+'. Este informe se llena a medida que los auxiliares van capturando información.</div>';
   }
   var lineas = Array.from(new Set(todos.map(function(l){ return l.linea; }))).sort();
   if(S.linea && lineas.indexOf(S.linea)<0) S.linea = "";
+  if(!consol){ S.ciudad = ""; S.bodega = ""; }
   var q = (S.q||"").trim().toLowerCase();
-  var base = todos.filter(function(l){
+  function pasaFiltros(l, conCiudad){
     if(S.linea && l.linea!==S.linea) return false;
     if(q && (l.cod+" "+l.desc).toLowerCase().indexOf(q)<0) return false;
+    if(conCiudad && S.ciudad && l.ciudad!==S.ciudad) return false;
+    if(conCiudad && S.bodega && l.bodega!==S.bodega) return false;
     return true;
-  });
+  }
+  var base = todos.filter(function(l){ return pasaFiltros(l, true); });
+
+  var htmlCiudades = "", ciudadChart = "", bodegaSel = "";
+  if(consol){
+    var nombresCiudades = CIUDADES.map(function(c){ return c.nombre; });
+    htmlCiudades = '<nav class="tabs" role="tablist" aria-label="Ciudad">'+
+      '<button data-ciudad="" class="'+(!S.ciudad?"active":"")+'">Eje Cafetero <small class="hint">'+fmtNum(todos.length,0)+'</small></button>'+
+      nombresCiudades.map(function(n){
+        var c = todos.filter(function(l){ return l.ciudad===n; }).length;
+        return '<button data-ciudad="'+esc(n)+'" class="'+(S.ciudad===n?"active":"")+'">'+esc(n)+' <small class="hint">'+fmtNum(c,0)+'</small></button>';
+      }).join("")+'</nav>';
+    var bods = {};
+    todos.forEach(function(l){ if(!S.ciudad || l.ciudad===S.ciudad) bods[l.bodega] = l.bdesc; });
+    if(S.bodega && !(S.bodega in bods)) S.bodega = "";
+    bodegaSel = '<select id="ixBodega" class="grow" aria-label="Bodega"><option value="">Todas las bodegas</option>'+
+      Object.keys(bods).sort().map(function(k){ return '<option value="'+esc(k)+'"'+(S.bodega===k?" selected":"")+'>'+esc(k+(bods[k]?" · "+bods[k]:""))+'</option>'; }).join("")+'</select>';
+    /* costo por vencer por ciudad (respeta línea y búsqueda, no la ciudad elegida) */
+    var porCiudad = {};
+    todos.forEach(function(l){
+      if(!pasaFiltros(l, false) || l.dias>60) return;
+      var o = porCiudad[l.ciudad] || (porCiudad[l.ciudad] = {vencido:0, b1:0, b2:0});
+      o[l.banda] += l.costo;
+    });
+    var cMax = 0; Object.keys(porCiudad).forEach(function(k){ var o = porCiudad[k]; cMax = Math.max(cMax, o.vencido+o.b1+o.b2); });
+    ciudadChart = '<section class="card"><div class="hd"><h3>Costo por vencer por ciudad</h3><p>Existencia vencida y que vence en 60 días o menos. Selecciona una ciudad para verla.</p></div>'+
+      (Object.keys(porCiudad).length ? nombresCiudades.filter(function(n){ return porCiudad[n]; }).map(function(n){
+        var o = porCiudad[n], tot = o.vencido+o.b1+o.b2;
+        return '<button type="button" class="band-row" data-ciudad="'+esc(n)+'" aria-pressed="'+(S.ciudad===n)+'" style="grid-template-columns:minmax(80px,110px) 1fr auto;">'+
+          '<span class="nm">'+esc(n)+'</span>'+
+          '<span class="bar-track">'+["vencido","b1","b2"].map(function(k){ return o[k]>0 ? '<span class="bar-seg '+BANDA_POR_ID[k].bg+'" style="width:'+(o[k]/cMax*100)+'%"></span>' : ""; }).join("")+'</span>'+
+          '<span class="num"><b>'+fmtMoneyC(tot)+'</b></span></button>';
+      }).join("") : '<p class="note">No hay existencia vencida ni por vencer en 60 días para esta selección.</p>')+
+    '</section>';
+  }
 
   var by = {}; BANDAS.forEach(function(b){ by[b.id] = {refs:{}, u:0, c:0, n:0}; });
   var refs = {}, uTot = 0, cTot = 0;
@@ -1223,10 +1509,11 @@ function renderIndicadoresTab(items){
   function pc(x){ return fmtPct(cTot ? x/cTot*100 : 0); }
   function kpi(l, v, n, c){ return '<div class="kpi '+(c||"")+'"><div class="l">'+l+'</div><div class="v">'+v+'</div><div class="n">'+(n||"")+'</div></div>'; }
 
-  var html = '<div class="ix-bar">'+
+  var html = htmlCiudades + '<div class="ix-bar">'+
     '<label class="hint" for="ixRef" style="margin:0;">Fecha de referencia</label>'+
     '<input type="date" id="ixRef" value="'+esc(ref)+'">'+
     '<button class="btn sm" id="ixHoy" type="button">Hoy</button>'+
+    bodegaSel+
     '<select id="ixLinea" class="grow" aria-label="Línea proveedor"><option value="">Todas las líneas de proveedor</option>'+
       lineas.map(function(k){ return '<option value="'+esc(k)+'"'+(S.linea===k?" selected":"")+'>'+esc(k)+'</option>'; }).join("")+'</select>'+
     '<input type="search" id="ixQ" class="grow" placeholder="Buscar código o descripción" value="'+esc(S.q||"")+'" aria-label="Buscar código o descripción">'+
@@ -1272,6 +1559,7 @@ function renderIndicadoresTab(items){
 
   html += '<div class="ix-grid">'+
     '<section class="card"><div class="hd"><h3>Rangos de vencimiento</h3><p>Costo de existencia por días para vencer. Selecciona un rango para filtrar la tabla.</p></div>'+bandsHtml+'</section>'+
+    ciudadChart+
     '<section class="card"><div class="hd"><h3>Líneas de proveedor con más alertas</h3><p>Existencia vencida (morado), de 1 a 30 días (rojo) y de 31 a 60 días (amarillo). Selecciona una línea para filtrar.</p></div>'+
       '<div class="seg" id="ixMode" role="group" aria-label="Medida"><button type="button" data-m="n" aria-pressed="'+(m==="n")+'">Lotes</button><button type="button" data-m="c" aria-pressed="'+(m==="c")+'">Costo</button></div>'+
       lineaHtml+
@@ -1328,6 +1616,7 @@ function renderIndicadoresTab(items){
     return ((x<y?-1:x>y?1:0)*dir) || (a.dias-b.dias);
   });
   var COLS = [["cod","Referencia"],["desc","Descripción"],["linea","Línea proveedor"],["cant","Unidades","r"],["fecha","Vence","r"],["dias","Días","r"],["costo","Costo existencia","r"],["banda","Semáforo"]];
+  if(consol) COLS.unshift(["ciudad","Ciudad"],["bodega","Bodega"]);
   var thead = '<tr>'+COLS.map(function(c){
     var sk = c[0]==="fecha"||c[0]==="banda" ? "dias" : c[0];
     var activo = c[0]===k;
@@ -1335,10 +1624,10 @@ function renderIndicadoresTab(items){
   }).join("")+'</tr>';
   var tot = 0; lista.forEach(function(l){ tot += l.costo; });
   var tbody = lista.slice(0,S.lim).map(function(l){
-    return '<tr><td class="mono">'+esc(l.cod)+'</td><td>'+esc(l.desc)+'</td><td>'+esc(l.linea)+'</td>'+
+    return '<tr>'+(consol?'<td>'+esc(l.ciudad)+'</td><td class="mono">'+esc(l.bodega)+'</td>':'')+'<td class="mono">'+esc(l.cod)+'</td><td>'+esc(l.desc)+'</td><td>'+esc(l.linea)+'</td>'+
       '<td class="num">'+fmtNum(l.cant,0)+'</td><td class="num">'+fmtFecha(l.fecha)+'</td><td class="num">'+l.dias+'</td>'+
       '<td class="num">'+fmtMoney(l.costo)+'</td><td>'+ixPill(l.banda)+'</td></tr>';
-  }).join("") || '<tr><td colspan="8" class="empty">No hay lotes para esta selección.</td></tr>';
+  }).join("") || '<tr><td colspan="10" class="empty">No hay lotes para esta selección.</td></tr>';
   html += '<section class="card ix"><div class="hd"><h3>Detalle de inventario</h3><p>'+fmtNum(lista.length,0)+' lotes · '+fmtMoney(tot)+'</p></div>'+
     '<div class="ix-table tablewrap"><table id="ixTbl"><thead>'+thead+'</thead><tbody>'+tbody+'</tbody></table></div>'+
     (lista.length>S.lim ? '<button class="btn sm" id="ixDetMore" type="button" style="align-self:flex-start;">Mostrar '+Math.min(60,lista.length-S.lim)+' más ('+fmtNum(lista.length-S.lim,0)+' restantes)</button>' : '')+
@@ -1358,7 +1647,14 @@ function wireIndicadoresTab(){
   var qEl = $("#ixQ");
   qEl.oninput = debounce(function(e){ S.q = e.target.value; S.lim = 60; state._ixFocusQ = true; render(); }, 200);
   if(state._ixFocusQ){ state._ixFocusQ = false; qEl.focus(); try{ qEl.setSelectionRange(qEl.value.length, qEl.value.length); }catch(e){} }
-  $("#ixLimpiar").onclick = function(){ S.banda = null; S.linea = ""; S.q = ""; S.lim = 60; render(); };
+  $("#ixLimpiar").onclick = function(){ S.banda = null; S.linea = ""; S.q = ""; S.bodega = ""; S.lim = 60; render(); };
+  var bsel = $("#ixBodega"); if(bsel) bsel.onchange = function(e){ S.bodega = e.target.value; S.lim = 60; render(); };
+  root.querySelectorAll("[data-ciudad]").forEach(function(b){
+    b.onclick = function(){
+      var c = b.getAttribute("data-ciudad");
+      S.ciudad = (b.classList.contains("band-row") && S.ciudad===c) ? "" : c; S.bodega = ""; S.lim = 60; render();
+    };
+  });
   var chip = $("[data-x=banda]"); if(chip) chip.onclick = function(){ S.banda = null; render(); };
   root.querySelectorAll("[data-b]").forEach(function(b){ b.onclick = function(){ var id = b.getAttribute("data-b"); S.banda = S.banda===id ? null : id; S.lim = 60; render(); }; });
   root.querySelectorAll("[data-lin]").forEach(function(b){ b.onclick = function(){ var l = b.getAttribute("data-lin"); S.linea = S.linea===l ? "" : l; S.lim = 60; render(); }; });
@@ -1374,34 +1670,83 @@ function wireIndicadoresTab(){
   });
 }
 
+/* ================= exportar a Excel ================= */
+function filasLotes(items, carga, ref){
+  var out = [];
+  items.forEach(function(it){
+    var cu = (it.costoUnit||0)/(it.factorUM||1);
+    (it.registros||[]).forEach(function(r){
+      var d = diasEntre(r.fechaVenc, ref), cant = Number(r.cantidad)||0;
+      out.push({
+        "Ciudad":(carga&&carga.ciudad)||it._ciudad||"", "Bodega":it.bodega||(carga&&carga.bodega)||"", "Desc. bodega":it.bodegaDesc||(carga&&carga.bodegaDesc)||"",
+        "Línea proveedor":it.lineaProveedor||"", "Código":it.referencia, "Descripción":it.descItem, "Marca":it.marca||"",
+        "Costo unitario":Math.round(cu*100)/100, "Unidades":cant, "Empaque":it.um||"", "Vence":fmtFecha(r.fechaVenc),
+        "Días":d, "Costo total":Math.round(cant*cu), "Semáforo":BANDA_POR_ID[bandaDe(d)].n, "Registrado por":nombreDe(r.capturadoPor)
+      });
+    });
+  });
+  return out;
+}
+function filasCruce(items, carga){
+  return items.map(function(it){
+    var sis = (it.existenciaUM||0)*(it.factorUM||1);
+    var fis = (it.registros||[]).reduce(function(s,r){ return s+(Number(r.cantidad)||0); }, 0);
+    var contado = it.registros && it.registros.length;
+    var pct = sis ? Math.abs(fis-sis)/sis : (fis?1:0);
+    return {
+      "Ciudad":(carga&&carga.ciudad)||it._ciudad||"", "Bodega":it.bodega||(carga&&carga.bodega)||"", "Código":it.referencia, "Descripción":it.descItem,
+      "Empaque":it.um||"", "Factor":it.factorUM||1, "Existencia sistema (und)":Math.round(sis*100)/100,
+      "Físico contado (und)":contado?fis:"", "Diferencia":contado?Math.round((fis-sis)*100)/100:"",
+      "Estado":!contado?"Sin contar":pct<=0.02?"Cuadra":pct<=0.10?"Diferencia leve":"Diferencia alta",
+      "Asignado a":nombreDe(it.asignadoA)
+    };
+  });
+}
+function filasResumenCiudad(lotes){
+  var por = {};
+  lotes.forEach(function(l){
+    var o = por[l["Ciudad"]||"Sin ciudad"] || (por[l["Ciudad"]||"Sin ciudad"] = {"Ciudad":l["Ciudad"]||"Sin ciudad", "Lotes":0, "Unidades":0, "Costo total":0, "Vencido":0, "1 a 30 días":0, "31 a 60 días":0, "61 a 90 días":0, "Más de 90 días":0});
+    o["Lotes"]++; o["Unidades"] += l["Unidades"]; o["Costo total"] += l["Costo total"];
+    var k = {"Vencido":"Vencido","De 1 a 30 días":"1 a 30 días","De 31 a 60 días":"31 a 60 días","De 61 a 90 días":"61 a 90 días","Más de 90 días":"Más de 90 días"}[l["Semáforo"]];
+    o[k] += l["Costo total"];
+  });
+  return Object.keys(por).sort().map(function(k){ return por[k]; });
+}
+function descargarExcel(hojas, nombre){
+  if(!window.XLSX){ notify("La librería de Excel no está disponible en este navegador."); return; }
+  var wb = XLSX.utils.book_new();
+  hojas.forEach(function(h){ XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(h.filas.length?h.filas:[{"Sin datos":""}]), h.nombre.slice(0,31)); });
+  XLSX.writeFile(wb, nombre);
+}
+
 function showQrModal(){
+  var c = cargaActual(), ciudad = c.ciudad ? ciudadPorNombre(c.ciudad) : null;
+  var base = location.origin + location.pathname;
+  var link = ciudad ? base + "?co=" + ciudad.co : base;
   var m = document.createElement("div");
   m.className = "modal-bg";
-  m.innerHTML = '<div class="modal"><div class="modal-head"><h2 style="font-size:17px;">Acceso para operarios</h2><button id="mClose">×</button></div>'+
-    '<p class="hint" style="margin-bottom:10px;">El operario escanea este código con la cámara de su celular para abrir la app y luego ingresa con su nombre y rol de Operario. No requiere instalar nada.</p>'+
-    '<div class="qr-box"><div id="qrcanvas"></div><code style="font-size:11px;word-break:break-all;text-align:center;">'+esc(location.href)+'</code></div>'+
+  m.innerHTML = '<div class="modal"><div class="modal-head"><h2 style="font-size:17px;">Acceso para auxiliares'+(ciudad?' · '+esc(ciudad.nombre):'')+'</h2><button id="mClose">×</button></div>'+
+    '<p class="hint" style="margin-bottom:10px;">El auxiliar escanea este código con la cámara de su celular, '+(ciudad?'entra directo a la lista de '+esc(ciudad.nombre)+' ':'elige su ciudad ')+'y toca su nombre. No requiere instalar nada.</p>'+
+    '<div class="qr-box"><div id="qrcanvas"></div><code style="font-size:11px;word-break:break-all;text-align:center;">'+esc(link)+'</code></div>'+
   '</div>';
   document.body.appendChild(m);
   m.querySelector("#mClose").onclick = function(){ m.remove(); };
   m.onclick = function(e){ if(e.target===m) m.remove(); };
   try{
-    if(window.QRCode){ new QRCode(m.querySelector("#qrcanvas"), {text: location.href, width:200, height:200}); }
+    if(window.QRCode){ new QRCode(m.querySelector("#qrcanvas"), {text: link, width:200, height:200}); }
     else { m.querySelector("#qrcanvas").textContent = "No se pudo generar el QR en este navegador."; }
   }catch(e){ m.querySelector("#qrcanvas").textContent = "No se pudo generar el QR."; }
 }
 
 /* ================= operario: pick carga (home) ================= */
-function operarioCargasConAsignacion(){
-  return state.cargas;
-}
-
 function renderOperarioHome(){
   var html = renderTopbar() + '<div class="wrap narrow">';
-  html += '<p class="eyebrow">Tus asignaciones</p><h1 style="font-size:20px;margin-bottom:14px;">Elige una carga</h1>';
-  if(!state.cargas.length){
-    html += '<div class="card empty">Aún no hay ninguna carga creada por un coordinador. Pídele que cree una y te asigne referencias.</div>';
+  var cargas = cargasVisibles();
+  html += '<p class="eyebrow">Tus asignaciones · '+esc(state.identity.ciudad)+'</p><h1 style="font-size:20px;margin-bottom:14px;">Elige una carga</h1>';
+  if(!cargas.length){
+    html += '<div class="card empty">Aún no hay ninguna carga creada en '+esc(state.identity.ciudad)+'. Pide a tu coordinador o supervisor que la cree y te asigne referencias.</div>';
   } else {
-    state.cargas.forEach(function(c){
+    cargas.forEach(function(c){
       html += '<div class="item-row" data-id="'+c.id+'"><div class="ico">📦</div><div class="info"><div class="t">'+esc(c.bodegaDesc||"Carga")+'</div><div class="m">'+esc(c.bodega||"")+' · '+(c.totalItems||0)+' referencias</div></div><div>→</div></div>';
     });
   }
@@ -1419,7 +1764,7 @@ function openCargaOperario(id){
 
 /* ================= operario: my items ================= */
 function myItems(){
-  return state.items.filter(function(it){ return it.asignadoA === state.identity.email; });
+  return state.items.filter(function(it){ return it.asignadoA === state.identity.id; });
 }
 
 function renderOperarioMine(){
@@ -1433,7 +1778,7 @@ function renderOperarioMine(){
   html += '<p class="eyebrow">Mis referencias</p><h1 style="font-size:20px;margin-bottom:10px;">'+mine.length+' asignadas</h1>';
 
   if(!mine.length){
-    html += '<div class="card empty">No tienes referencias asignadas en esta carga todavía (buscando por tu correo "'+esc(state.identity.email)+'"). Pide al coordinador que te asigne alguna, usando exactamente ese correo.</div></div>';
+    html += '<div class="card empty">No tienes referencias asignadas en esta carga todavía. Pide a tu coordinador o supervisor que te asigne alguna.</div></div>';
     root.innerHTML = html; wireTopbar();
     root.querySelector("#backBtn").onclick = backToOperarioHome;
     return;
@@ -1633,7 +1978,7 @@ function renderOperarioEntry(){
     if(!fecha){ await notify("Elige una fecha de vencimiento."); return; }
     if(fecha < todayISO() && !(await askConfirm("La fecha "+fecha+" ya pasó. ¿Confirmas que este producto está físicamente vencido?"))){ return; }
     await Store.addRegistro(state.currentCargaId, it.id, {
-      cantidad:cant, fechaVenc:fecha, capturadoPor:state.identity.email, capturadoEn:new Date().toISOString(),
+      cantidad:cant, fechaVenc:fecha, capturadoPor:state.identity.id, capturadoEn:new Date().toISOString(),
       confirmadoManual: state._entryManualConfirm, codigoEscaneado: state._entryScannedCode
     });
     state._entryCantidad = ""; state._entryManualConfirm = false; state._entryScannedCode = null;
@@ -1650,7 +1995,10 @@ function renderOperarioEntry(){
 function render(){
   if(!state.identity){ renderLogin(); return; }
   if(state.identity.rol === "administrador"){
-    renderAdminPanel();
+    if(state.view==="detail" && state.currentCargaId) renderCoordinadorDetail();
+    else if(state.adminTab==="usuarios") renderAdminPanel();
+    else if(state.adminTab==="consolidado") renderConsolidado();
+    else renderCoordinadorList();
   } else if(state.identity.rol === "coordinador"){
     if(state.view==="detail" && state.currentCargaId) renderCoordinadorDetail();
     else renderCoordinadorList();
@@ -1667,7 +2015,7 @@ function render(){
   await Store.init();
   state.syncMode = USE_DB ? "db" : "local";
   Store.onCargas(function(list){ setState({cargas:list}); });
-  Store.onUsuarios(function(list){ setState({usuarios:list}); });
+  Store.onUsuarios(function(list){ setState({usuarios:list, usuariosListos:true}); });
 })();
 
 })();
