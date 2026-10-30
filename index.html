@@ -88,16 +88,12 @@ input:focus-visible, button:focus-visible, select:focus-visible{ outline:2px sol
   .brand .sub{ display:none; }
   .who{ flex-wrap:wrap; justify-content:flex-end; margin-left:auto; gap:8px; }
 }
-.mz-head{ background:#1f1d19; color:#f5efe2; border-radius:var(--radius-lg); padding:14px 16px; display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:12px; }
-.mz-head h2{ color:#fff; font-size:18px; }
-.mz-head .sub{ color:var(--accent); font-family:"IBM Plex Mono",monospace; font-size:12px; letter-spacing:.06em; text-transform:uppercase; margin-top:2px; }
-.mz-head .btn{ background:transparent; color:#f5efe2; border-color:#4a4640; box-shadow:none; }
-.mz-head .btn:hover{ border-color:var(--accent); }
-.mz-head .btn.gold{ background:var(--accent); color:#1a1814; border-color:var(--accent); }
-.mz-head .btn:disabled{ opacity:.4; }
+.mz-head{ background:var(--surface); border:1px solid var(--border); box-shadow:var(--shadow); border-radius:var(--radius-lg); padding:14px 16px; display:flex; justify-content:space-between; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:12px; }
+.mz-head h2{ font-size:18px; }
+.mz-head .sub{ color:var(--accent-strong); font-family:"IBM Plex Mono",monospace; font-size:12px; letter-spacing:.06em; text-transform:uppercase; margin-top:2px; }
 .chipf{ border:1px solid var(--accent); background:var(--surface); color:var(--ink); border-radius:999px; padding:6px 12px; font-size:12px; font-weight:700; font-family:"IBM Plex Mono",monospace; text-transform:uppercase; cursor:pointer; }
 .chipf.mute{ border-color:var(--border); color:var(--muted); }
-.chipf.on{ background:var(--accent); border-color:var(--accent); color:#1a1814; }
+.chipf.on{ background:var(--accent); border-color:var(--accent); color:var(--on-accent); }
 .topbar.compact{ padding:6px 10px; gap:8px; flex-wrap:nowrap; }
 .topbar.compact .brand .mark{ width:20px; height:30px; }
 .topbar.compact .who{ gap:8px; font-size:13px; margin-left:auto; flex-wrap:nowrap; }
@@ -1086,10 +1082,10 @@ function renderMatriz(){
 
   var html = renderTopbar() + '<div class="wrap">' + renderAdminNav("matriz");
   html += '<div class="mz-head"><div><h2>Matriz de asignación</h2><div class="sub">📍 '+esc(ciudad.nombre)+' · C.O. '+co+'</div>'+
-    '<div class="hint" style="color:#b9ad96;margin:2px 0 0;">'+todas.length+' refs'+(sinUb?' · '+sinUb+' sin ubicación':'')+(sinAux?' · '+sinAux+' sin auxiliar':'')+'</div></div>'+
+    '<div class="hint" style="margin:2px 0 0;">'+todas.length+' refs'+(sinUb?' · '+sinUb+' sin ubicación':'')+(sinAux?' · '+sinAux+' sin auxiliar':'')+'</div></div>'+
     '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">'+
-      (esAdmin ? '<select id="mzCo" aria-label="Ciudad" style="padding:8px 10px;border:1px solid #4a4640;border-radius:12px;background:#2b2823;color:#f5efe2;">'+CIUDADES.map(function(c){ return '<option value="'+c.co+'"'+(c.co===co?" selected":"")+'>'+esc(c.nombre)+'</option>'; }).join("")+'</select>' : '')+
-      '<button class="btn gold sm" id="mzAgregar">+ Agregar</button>'+
+      (esAdmin ? '<select id="mzCo" aria-label="Ciudad" style="padding:8px 10px;border:1.5px solid var(--border);border-radius:12px;background:var(--bg);">'+CIUDADES.map(function(c){ return '<option value="'+c.co+'"'+(c.co===co?" selected":"")+'>'+esc(c.nombre)+'</option>'; }).join("")+'</select>' : '')+
+      '<button class="btn primary sm" id="mzAgregar">+ Agregar</button>'+
       '<button class="btn sm" id="mzActualizar">⟳ Actualizar</button>'+
       '<button class="btn sm" id="mzImport">⇪ Subir Excel</button>'+
       '<button class="btn sm" id="mzExport"'+(todas.length?"":" disabled")+'>⇩ Exportar</button>'+
