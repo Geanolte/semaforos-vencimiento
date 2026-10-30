@@ -680,6 +680,30 @@ var Store = {
     }
   },
 
+  /* Matriz de asignación permanente por ciudad: "matrices/<C.O.>/lineas/<referencia>" */
+  async getMatriz(co){
+    if(USE_DB){
+      var snap = await dbNs.collection("matrices/"+co+"/lineas").get();
+      return snap.docs.map(function(d){ return Object.assign({id:d.id}, d.data()); });
+    }
+    var m = ((lsRead().matrices||{})[co]) || {};
+    return Object.keys(m).map(function(id){ return Object.assign({id:id}, m[id]); });
+  },
+  async setMatrizLinea(co, id, datos){
+    if(USE_DB){ await dbNs.doc("matrices/"+co+"/lineas/"+id).set(datos); }
+    else { var s = lsRead(); s.matrices = s.matrices||{}; s.matrices[co] = s.matrices[co]||{}; s.matrices[co][id] = datos; lsWrite(s); }
+  },
+  async deleteMatrizLinea(co, id){
+    if(USE_DB){ await dbNs.doc("matrices/"+co+"/lineas/"+id).delete(); }
+    else { var s = lsRead(); if(s.matrices && s.matrices[co]) delete s.matrices[co][id]; lsWrite(s); }
+  },
+  async limpiarMatriz(co){
+    if(USE_DB){
+      var snap = await dbNs.collection("matrices/"+co+"/lineas").get();
+      await inBatches(snap.docs, DB_BATCH, function(d){ return dbNs.doc("matrices/"+co+"/lineas/"+d.id).delete(); });
+    } else { var s = lsRead(); if(s.matrices) delete s.matrices[co]; lsWrite(s); }
+  },
+
   async setCargaCiudad(cargaId, ciudad, co){
     if(USE_DB){ await dbNs.doc("cargas/"+cargaId).update({ciudad:ciudad, co:co}); }
     else { var s = lsRead(); if(s.cargas && s.cargas[cargaId]){ Object.assign(s.cargas[cargaId].meta, {ciudad:ciudad, co:co}); lsWrite(s); } }
@@ -804,7 +828,7 @@ function loginComo(u){
   if(u.activo===false){ notify("Tu usuario está desactivado. Contacta al administrador."); return; }
   var identity = {id:u.id, nombre:u.nombre, rol:u.rol, ciudad:u.ciudad, co:u.co};
   setIdentity(identity);
-  setState({identity:identity, view: u.rol==="operario"?"home":"list", adminTab:"consolidado", currentCargaId:null, _consol:null});
+  setState({identity:identity, view: u.rol==="operario"?"home":"list", adminTab: u.rol==="administrador" ? "consolidado" : "cargas", currentCargaId:null, _consol:null, _matriz:null});
 }
 
 function renderLogin(){
@@ -936,16 +960,216 @@ function wireTopbar(){
 
 /* ================= administrador ================= */
 function renderAdminNav(active){
+  var esAdmin = state.identity.rol==="administrador";
+  function t(k, label){ return '<button data-nav="'+k+'" class="'+(active===k?"active":"")+'">'+label+'</button>'; }
   return '<div class="tabs">'+
-    '<button data-nav="consolidado" class="'+(active==="consolidado"?"active":"")+'">Informe consolidado</button>'+
-    '<button data-nav="cargas" class="'+(active==="cargas"?"active":"")+'">Cargas por ciudad</button>'+
-    '<button data-nav="usuarios" class="'+(active==="usuarios"?"active":"")+'">Usuarios</button>'+
+    (esAdmin ? t("consolidado","Informe consolidado") : "")+
+    t("cargas", esAdmin ? "Cargas por ciudad" : "Cargas")+
+    t("matriz","Matriz de asignación")+
+    (esAdmin ? t("usuarios","Usuarios") : "")+
   '</div>';
 }
 function wireAdminNav(){
   root.querySelectorAll("[data-nav]").forEach(function(b){
     b.onclick = function(){ state.adminTab = b.getAttribute("data-nav"); state.view = "list"; render(); };
   });
+}
+
+/* ================= matriz de asignación por ciudad =================
+   Lista permanente (por ciudad) de referencia -> auxiliar + ubicación. La mantienen el coordinador/supervisor
+   de la ciudad (y el administrador) y se aplica automáticamente a cada carga nueva de esa ciudad. */
+function safeId(s){ return String(s).trim().replace(/[^A-Za-z0-9._~:@+-]/g, "_"); }
+function coMatriz(){
+  var id = state.identity;
+  if(id.rol==="administrador") return state._matrizCo || CIUDADES[0].co;
+  var c = ciudadPorNombre(id.ciudad); return c ? c.co : null;
+}
+function estaEnMatriz(){ return state.identity && state.identity.rol!=="operario" && state.adminTab==="matriz" && state.view!=="detail"; }
+async function cargarMatriz(co){
+  state._matriz = {co:co, filas:null};
+  try{ state._matriz = {co:co, filas:await Store.getMatriz(co)}; }
+  catch(err){ state._matriz = {co:co, filas:[], error:(err&&err.message?err.message:String(err))}; }
+  if(estaEnMatriz()) render();
+}
+function datosMatriz(f, extra){
+  return Object.assign({referencia:f.referencia, descItem:f.descItem||"", auxiliarId:f.auxiliarId||null, ubicacion:f.ubicacion==null?null:f.ubicacion,
+    actualizadoEn:new Date().toISOString(), actualizadoPor:state.identity.id}, extra||{});
+}
+
+function renderMatriz(){
+  var co = coMatriz(), ciudad = co ? ciudadPorCo(co) : null;
+  if(!ciudad){ root.innerHTML = renderTopbar()+'<div class="wrap">'+renderAdminNav("matriz")+'<div class="card empty">Tu usuario no tiene una ciudad asignada.</div></div>'; wireTopbar(); wireAdminNav(); return; }
+  if(!state._matriz || state._matriz.co!==co){ cargarMatriz(co); }
+  var M = (state._matriz && state._matriz.co===co) ? state._matriz : {filas:null};
+  var aux = usuariosDeCiudad(ciudad.nombre, "operario");
+  var esAdmin = state.identity.rol==="administrador";
+  var q = (state._mzQ||"").trim().toLowerCase(), af = state._mzAux||"";
+  var filas = (M.filas||[]).slice().sort(function(a,b){ return ordenGuiado({ubicacion:a.ubicacion, referencia:a.referencia}, {ubicacion:b.ubicacion, referencia:b.referencia}); });
+  var vis = filas.filter(function(f){
+    if(af && (f.auxiliarId||"")!==(af==="__sin__"?"":af)) return false;
+    if(q && (String(f.referencia)+" "+(f.descItem||"")).toLowerCase().indexOf(q)<0) return false;
+    return true;
+  });
+  var lim = state._mzLim || 100;
+  function optsAux(sel){ return '<option value="">Sin auxiliar</option>'+aux.map(function(u){ return '<option value="'+esc(u.id)+'"'+(sel===u.id?" selected":"")+'>'+esc(u.nombre)+'</option>'; }).join(""); }
+
+  var html = renderTopbar() + '<div class="wrap">' + renderAdminNav("matriz");
+  html += '<div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:14px;">'+
+    '<div><p class="eyebrow">Matriz de asignación · '+esc(ciudad.nombre)+'</p><h1 style="font-size:22px;">Referencias por auxiliar y ubicación</h1>'+
+    '<p class="hint">Se aplica sola a cada carga nueva de '+esc(ciudad.nombre)+'. El auxiliar recorre sus referencias por ubicación y luego por código.</p></div>'+
+    '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">'+
+      (esAdmin ? '<select id="mzCo" aria-label="Ciudad" style="padding:9px 12px;border:1.5px solid var(--border);border-radius:var(--radius-md);background:var(--surface);">'+CIUDADES.map(function(c){ return '<option value="'+c.co+'"'+(c.co===co?" selected":"")+'>'+esc(c.nombre)+'</option>'; }).join("")+'</select>' : '')+
+      '<button class="btn" id="mzImport">Importar Excel</button><button class="btn" id="mzExport"'+(filas.length?"":" disabled")+'>Descargar Excel</button>'+
+    '</div></div>';
+
+  html += '<div class="card" style="margin-bottom:14px;"><h3 style="font-size:15px;margin-bottom:10px;">Agregar referencia</h3>'+
+    '<div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;">'+
+      '<div class="field" style="flex:1;min-width:120px;margin-bottom:0;"><label>Referencia</label><input id="mzRef" placeholder="Código" autocomplete="off"></div>'+
+      '<div class="field" style="flex:2;min-width:160px;margin-bottom:0;"><label>Descripción (opcional)</label><input id="mzDesc" autocomplete="off"></div>'+
+      '<div class="field" style="flex:2;min-width:180px;margin-bottom:0;"><label>Auxiliar</label><select id="mzAuxNuevo">'+optsAux("")+'</select></div>'+
+      '<div class="field" style="width:100px;margin-bottom:0;"><label>Ubicación</label><input id="mzUb" inputmode="numeric" autocomplete="off"></div>'+
+      '<button class="btn primary" id="mzAdd">Agregar</button></div></div>';
+
+  html += '<div class="ix-bar"><input type="search" id="mzQ" class="grow" placeholder="Buscar referencia o descripción" value="'+esc(state._mzQ||"")+'">'+
+    '<select id="mzAuxF" class="grow"><option value="">Todos los auxiliares</option><option value="__sin__"'+(af==="__sin__"?" selected":"")+'>Sin auxiliar</option>'+
+      aux.map(function(u){ return '<option value="'+esc(u.id)+'"'+(af===u.id?" selected":"")+'>'+esc(u.nombre)+'</option>'; }).join("")+'</select>'+
+    '<span class="hint" style="margin:0;">'+vis.length+' de '+filas.length+' referencias</span></div>';
+
+  if(M.filas===null){
+    html += '<div class="card empty">Cargando la matriz…</div>';
+  } else if(!filas.length){
+    html += '<div class="card empty">La matriz de '+esc(ciudad.nombre)+' está vacía. Agrega referencias arriba o usa "Importar Excel" (columnas: Referencia, Auxiliar, Ubicación y, opcional, Descripción).</div>';
+  } else {
+    html += '<div class="card" style="padding:0;"><div class="tablewrap"><table><thead><tr><th>Ubic.</th><th>Referencia</th><th>Descripción</th><th>Auxiliar</th><th></th></tr></thead><tbody>'+
+      vis.slice(0,lim).map(function(f){
+        return '<tr><td style="width:84px;"><input class="mz-ub" data-id="'+esc(f.id)+'" value="'+esc(f.ubicacion==null?"":f.ubicacion)+'" inputmode="numeric" style="width:70px;padding:6px 8px;border:1.5px solid var(--border);border-radius:10px;background:var(--bg);"></td>'+
+          '<td class="mono">'+esc(f.referencia)+'</td><td>'+esc(f.descItem||"")+'</td>'+
+          '<td><select class="mz-aux" data-id="'+esc(f.id)+'" style="padding:6px 8px;border:1.5px solid var(--border);border-radius:10px;background:var(--bg);">'+optsAux(f.auxiliarId)+'</select></td>'+
+          '<td><button class="btn sm danger mz-del" data-id="'+esc(f.id)+'" title="Quitar">✕</button></td></tr>';
+      }).join("")+'</tbody></table></div></div>'+
+      (vis.length>lim ? '<button class="btn sm" id="mzMas" style="margin-top:10px;">Mostrar 100 más ('+(vis.length-lim)+' restantes)</button>' : '');
+  }
+  html += '</div>';
+  root.innerHTML = html;
+  wireTopbar(); wireAdminNav();
+
+  var fila = function(id){ return (state._matriz.filas||[]).filter(function(f){ return f.id===id; })[0]; };
+  var cs = root.querySelector("#mzCo"); if(cs) cs.onchange = function(e){ state._matrizCo = e.target.value; state._matriz = null; state._mzLim = 100; render(); };
+  root.querySelector("#mzQ").oninput = debounce(function(e){ state._mzQ = e.target.value; state._mzLim = 100; state._mzFocus = true; render(); }, 200);
+  if(state._mzFocus){ state._mzFocus = false; var qi = root.querySelector("#mzQ"); qi.focus(); try{ qi.setSelectionRange(qi.value.length, qi.value.length); }catch(e){} }
+  root.querySelector("#mzAuxF").onchange = function(e){ state._mzAux = e.target.value; state._mzLim = 100; render(); };
+  var mas = root.querySelector("#mzMas"); if(mas) mas.onclick = function(){ state._mzLim = lim + 100; render(); };
+  root.querySelector("#mzExport").onclick = function(){
+    descargarExcel([{nombre:"Matriz "+ciudad.nombre, filas:filas.map(function(f){
+      return {"Referencia":f.referencia, "Descripción":f.descItem||"", "Auxiliar":nombreDe(f.auxiliarId), "Ubicación":f.ubicacion==null?"":f.ubicacion};
+    })}], "Matriz asignacion "+ciudad.nombre+" "+todayISO()+".xlsx");
+  };
+  root.querySelector("#mzImport").onclick = function(){ showImportMatriz(ciudad); };
+  root.querySelector("#mzAdd").onclick = async function(){
+    var ref = root.querySelector("#mzRef").value.trim();
+    if(!ref){ await notify("Escribe la referencia."); return; }
+    var id = safeId(ref);
+    if((state._matriz.filas||[]).some(function(f){ return f.id===id; })){ await notify("Esa referencia ya está en la matriz: edítala en la tabla."); return; }
+    var f = {referencia:ref, descItem:root.querySelector("#mzDesc").value.trim(), auxiliarId:root.querySelector("#mzAuxNuevo").value||null, ubicacion:limpiarUbic(root.querySelector("#mzUb").value)};
+    try{ await Store.setMatrizLinea(co, id, datosMatriz(f)); state._matriz.filas.push(Object.assign({id:id}, f)); render(); }
+    catch(err){ await notify("No se pudo agregar: "+(err&&err.message?err.message:err)); }
+  };
+  root.querySelectorAll(".mz-aux").forEach(function(s){
+    s.onchange = async function(){
+      var f = fila(s.getAttribute("data-id")); if(!f) return;
+      try{ await Store.setMatrizLinea(co, f.id, datosMatriz(f, {auxiliarId:s.value||null})); f.auxiliarId = s.value||null; }
+      catch(err){ await notify("No se pudo guardar: "+(err&&err.message?err.message:err)); render(); }
+    };
+  });
+  root.querySelectorAll(".mz-ub").forEach(function(i){
+    i.onchange = async function(){
+      var f = fila(i.getAttribute("data-id")); if(!f) return;
+      var nuevo = limpiarUbic(i.value);
+      try{ await Store.setMatrizLinea(co, f.id, datosMatriz(f, {ubicacion:nuevo})); f.ubicacion = nuevo; }
+      catch(err){ await notify("No se pudo guardar: "+(err&&err.message?err.message:err)); render(); }
+    };
+  });
+  root.querySelectorAll(".mz-del").forEach(function(b){
+    b.onclick = async function(){
+      var f = fila(b.getAttribute("data-id")); if(!f) return;
+      if(!(await askConfirm('¿Quitar la referencia '+f.referencia+' de la matriz?'))) return;
+      try{ await Store.deleteMatrizLinea(co, f.id); state._matriz.filas = state._matriz.filas.filter(function(x){ return x.id!==f.id; }); render(); }
+      catch(err){ await notify("No se pudo quitar: "+(err&&err.message?err.message:err)); }
+    };
+  });
+}
+
+function showImportMatriz(ciudad){
+  var m = document.createElement("div");
+  m.className = "modal-bg";
+  m.innerHTML = '<div class="modal" style="max-width:600px;">'+
+    '<div class="modal-head"><h2 style="font-size:17px;">Importar matriz de '+esc(ciudad.nombre)+'</h2><button id="imxClose">×</button></div>'+
+    '<p class="hint" style="margin-bottom:10px;">Columnas: <b>Referencia</b>, <b>Auxiliar</b> (nombre), <b>Ubicación</b> y, opcional, <b>Descripción</b>. Por defecto se agregan las nuevas y se actualizan las que ya existen.</p>'+
+    '<div class="field"><input type="file" id="imxFile" accept=".xlsx,.xls"></div>'+
+    '<label class="assign-check" style="margin-bottom:8px;"><input type="checkbox" id="imxReemplazar"> <span>Reemplazar toda la matriz (borra las referencias que no estén en el archivo)</span></label>'+
+    '<div id="imxPreview" style="max-height:240px;overflow:auto;font-size:13px;"></div>'+
+    '<button class="btn primary block" id="imxOk" disabled style="margin-top:12px;">Importar</button></div>';
+  document.body.appendChild(m);
+  var filas = [];
+  m.querySelector("#imxClose").onclick = function(){ m.remove(); };
+  m.onclick = function(e){ if(e.target===m) m.remove(); };
+  m.querySelector("#imxFile").onchange = function(e){
+    var f = e.target.files[0]; if(!f) return;
+    var reader = new FileReader();
+    reader.onload = function(ev){
+      var box = m.querySelector("#imxPreview");
+      try{
+        var wb = XLSX.read(ev.target.result, {type:"array"});
+        var rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], {defval:""});
+        filas = []; var sinAux = {}, vistos = {};
+        rows.forEach(function(r){
+          var ref = String(colExcel(r, ["Referencia","Código","Codigo"])||"").trim(); if(!ref || vistos[safeId(ref)]) return;
+          vistos[safeId(ref)] = true;
+          var txt = String(colExcel(r, ["Auxiliar","Asignar a","Asignado a"])||"").trim();
+          var uid = txt ? resolverAsignadoCiudad(txt, ciudad.nombre) : null;
+          if(txt && !uid) sinAux[txt] = true;
+          filas.push({id:safeId(ref), referencia:ref, descItem:String(colExcel(r, ["Descripción","Descripcion","Desc. item"])||"").trim(),
+            auxiliarId:uid, ubicacion:limpiarUbic(colExcel(r, ["Ubicación","Ubicacion","Posición","Posicion","Ubic"]))});
+        });
+        box.innerHTML = '<p><b>'+filas.length+'</b> referencias · <b>'+filas.filter(function(x){return x.auxiliarId;}).length+'</b> con auxiliar · <b>'+filas.filter(function(x){return x.ubicacion!=null;}).length+'</b> con ubicación.</p>'+
+          (Object.keys(sinAux).length ? '<p style="color:var(--danger);">Auxiliares no encontrados en '+esc(ciudad.nombre)+' (quedan sin auxiliar): '+esc(Object.keys(sinAux).join(", "))+'</p>' : '');
+        var b = m.querySelector("#imxOk"); b.disabled = !filas.length; b.textContent = filas.length ? "Importar "+filas.length+" referencias" : "Nada que importar";
+      }catch(err){ box.innerHTML = '<p style="color:var(--danger);">No se pudo leer el archivo: '+esc(err.message||err)+'</p>'; }
+    };
+    reader.readAsArrayBuffer(f);
+  };
+  m.querySelector("#imxOk").onclick = async function(){
+    var reemplazar = m.querySelector("#imxReemplazar").checked;
+    if(reemplazar && !(await askConfirm("Se borrará la matriz actual de "+ciudad.nombre+" y quedará solo lo del archivo. ¿Continuar?"))) return;
+    try{
+      if(reemplazar) await Store.limpiarMatriz(ciudad.co);
+      await inBatches(filas, DB_BATCH, function(f){ return Store.setMatrizLinea(ciudad.co, f.id, datosMatriz(f)); });
+      state._matriz = null; m.remove(); await notify("Se importaron "+filas.length+" referencias a la matriz de "+ciudad.nombre+"."); render();
+    }catch(err){ await notify("No se pudo importar: "+(err&&err.message?err.message:err)); }
+  };
+}
+
+/* Aplica la matriz de la ciudad a la carga abierta (sobrescribe auxiliar y ubicación de las referencias que estén en la matriz). */
+async function aplicarMatrizACarga(){
+  var carga = cargaActual(), co = carga.co || ((ciudadPorNombre(carga.ciudad)||{}).co);
+  if(!co){ await notify("Esta carga no tiene ciudad. Asígnale una ciudad primero."); return; }
+  var filas;
+  try{ filas = await Store.getMatriz(co); }catch(err){ await notify("No se pudo leer la matriz: "+(err&&err.message?err.message:err)); return; }
+  var porRef = {}; filas.forEach(function(f){ porRef[String(f.referencia).trim()] = f; });
+  var updates = [];
+  state.items.forEach(function(it){
+    var f = porRef[String(it.referencia).trim()]; if(!f) return;
+    var d = {}; if(f.auxiliarId) d.asignadoA = f.auxiliarId; if(f.ubicacion!=null) d.ubicacion = f.ubicacion;
+    if(Object.keys(d).length) updates.push({id:it.id, datos:d});
+  });
+  if(!updates.length){ await notify(filas.length ? "Ninguna referencia de esta carga está en la matriz de "+carga.ciudad+"." : "La matriz de "+carga.ciudad+" está vacía."); return; }
+  if(!(await askConfirm("La matriz de "+carga.ciudad+" asignará "+updates.length+" referencias de esta carga (reemplaza el auxiliar y la ubicación actuales de esas referencias). ¿Continuar?"))) return;
+  try{
+    await Store.updateItems(state.currentCargaId, updates);
+    var ops = Array.from(new Set(updates.filter(function(u){ return u.datos.asignadoA; }).map(function(u){ return u.datos.asignadoA; })));
+    for(var i=0;i<ops.length;i++) await Store.assignItems(state.currentCargaId, [], ops[i]);
+    await notify("Matriz aplicada a "+updates.length+" referencias.");
+  }catch(err){ await notify("No se pudo aplicar la matriz: "+(err&&err.message?err.message:err)); }
 }
 
 /* Importa el listado de personal desde un Excel (columnas: C.O, Operación, Nombres, Cargo).
@@ -1159,7 +1383,7 @@ function renderCoordinadorList(){
   var id = state.identity, esAdmin = id.rol==="administrador";
   var cargas = cargasVisibles();
   var html = renderTopbar() + '<div class="wrap">';
-  if(esAdmin) html += renderAdminNav("cargas");
+  html += renderAdminNav("cargas");
   html += '<div style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:16px;flex-wrap:wrap;">'+
     '<div><p class="eyebrow">Cargas de referencias · '+esc(esAdmin ? (state._filtroCiudad||"Todas las ciudades") : id.ciudad)+'</p><h1 style="font-size:22px;">Selecciona o crea una carga</h1></div>'+
     '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">'+
@@ -1188,7 +1412,7 @@ function renderCoordinadorList(){
   html += '<p class="footer-note">Los auxiliares ingresan con este mismo enlace o con el código QR (se abre desde dentro de una carga), eligiendo su ciudad y su nombre.</p>';
   html += '</div>';
   root.innerHTML = html;
-  wireTopbar(); if(esAdmin) wireAdminNav();
+  wireTopbar(); wireAdminNav();
   var fc = root.querySelector("#filtroCiudad"); if(fc) fc.onchange = function(e){ state._filtroCiudad = e.target.value; render(); };
 
   root.querySelectorAll(".carga-row").forEach(function(r){
@@ -1301,11 +1525,25 @@ function showUploadModal(){
       o.asignadoA = resolverAsignado(x.asignarTexto, ciudad);
       return o;
     });
+    /* La matriz de la ciudad completa lo que el Excel no traiga (auxiliar y ubicación). */
+    var desdeMatriz = 0;
+    try{
+      var mz = c ? await Store.getMatriz(c.co) : [], porRef = {};
+      mz.forEach(function(f){ porRef[String(f.referencia).trim()] = f; });
+      items.forEach(function(it){
+        var f = porRef[String(it.referencia).trim()]; if(!f) return;
+        var usado = false;
+        if(!it.asignadoA && f.auxiliarId){ it.asignadoA = f.auxiliarId; usado = true; }
+        if(it.ubicacion==null && f.ubicacion!=null){ it.ubicacion = f.ubicacion; usado = true; }
+        if(usado) desdeMatriz++;
+      });
+    }catch(e){}
     var operarios = Array.from(new Set(items.filter(function(x){return x.asignadoA;}).map(function(x){return x.asignadoA;})));
     var meta = {bodega:parsed[0].bodega, bodegaDesc:parsed[0].bodegaDesc, ciudad:ciudad, co:c?c.co:"", creadoPor:idn.nombre, creadoPorId:idn.id, totalItems:items.length, operarios:operarios};
     var cid = await Store.createCarga(meta, items);
     m.remove();
     openCarga(cid);
+    if(desdeMatriz) notify("La matriz de "+ciudad+" asignó automáticamente "+desdeMatriz+" referencias (auxiliar y/o ubicación).");
   };
 }
 
@@ -1455,6 +1693,7 @@ function renderAsignarTab(items, operarios){
       '<button class="btn" id="btnAutoAssign">Repartir equitativo</button>'+
       '<button class="btn" id="btnSelAll">Seleccionar todas</button>'+
       '<button class="btn" id="btnImportAsig">Importar asignación (Excel)</button>'+
+      '<button class="btn" id="btnAplicarMatriz">Aplicar matriz de la ciudad</button>'+
     '</div>'+
   '</div>';
 
@@ -1566,6 +1805,7 @@ function wireAsignarTab(){
   };
   sel.onchange = function(e){ state.operarioInput = e.target.value; };
   root.querySelector("#btnImportAsig").onclick = showImportAsignacion;
+  root.querySelector("#btnAplicarMatriz").onclick = aplicarMatrizACarga;
   root.querySelectorAll(".rowchk").forEach(function(c){
     c.onchange = function(){ state.selectedIds[c.getAttribute("data-id")] = c.checked; };
   });
@@ -2326,9 +2566,11 @@ function render(){
     if(state.view==="detail" && state.currentCargaId) renderCoordinadorDetail();
     else if(state.adminTab==="usuarios") renderAdminPanel();
     else if(state.adminTab==="consolidado") renderConsolidado();
+    else if(state.adminTab==="matriz") renderMatriz();
     else renderCoordinadorList();
   } else if(state.identity.rol === "coordinador"){
     if(state.view==="detail" && state.currentCargaId) renderCoordinadorDetail();
+    else if(state.adminTab==="matriz") renderMatriz();
     else renderCoordinadorList();
   } else {
     if(state.view==="entry" && state.activeItemId) renderOperarioEntry();
