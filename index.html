@@ -88,6 +88,27 @@ input:focus-visible, button:focus-visible, select:focus-visible{ outline:2px sol
   .brand .sub{ display:none; }
   .who{ flex-wrap:wrap; justify-content:flex-end; margin-left:auto; gap:8px; }
 }
+.topbar.compact{ padding:6px 10px; gap:8px; flex-wrap:nowrap; }
+.topbar.compact .brand .mark{ width:20px; height:30px; }
+.topbar.compact .who{ gap:8px; font-size:13px; margin-left:auto; flex-wrap:nowrap; }
+.topbar.compact .who button{ padding:4px 12px; }
+.topbar.compact #themeToggle{ width:28px; height:28px; padding:0; }
+.topbar.compact .who .name{ max-width:42vw; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.sync-dot{ width:10px; height:10px; border-radius:50%; display:inline-block; flex:none; }
+.sync-dot.ok{ background:var(--green); } .sync-dot.local{ background:var(--amber); }
+.wrap.compactwrap{ padding:10px 12px 40px; }
+.mine-bar{ display:flex; align-items:center; justify-content:space-between; margin-bottom:6px; }
+.scan-card{ background:var(--surface); border:2px solid var(--accent); border-radius:var(--radius-lg); padding:12px 14px; margin-bottom:10px; box-shadow:var(--shadow); }
+.scan-card label{ display:block; font-size:12px; font-weight:700; color:var(--ink-soft); margin-bottom:6px; text-transform:uppercase; letter-spacing:.05em; }
+.scan-card input{ width:100%; padding:20px 14px; font-size:19px; border:2px solid var(--accent); border-radius:var(--radius-md); background:var(--bg); }
+.next-card{ background:var(--accent-bg); border:1.5px solid var(--accent); border-radius:var(--radius-lg); padding:10px 12px; margin-bottom:10px; }
+.nx-top{ display:flex; justify-content:space-between; font-size:11px; letter-spacing:.08em; text-transform:uppercase; color:var(--accent-strong); font-weight:700; margin-bottom:6px; }
+.nx-row{ display:flex; gap:12px; align-items:center; }
+.nx-loc{ flex:0 0 auto; min-width:58px; text-align:center; background:var(--surface); border:1.5px solid var(--accent); border-radius:14px; padding:6px 8px; }
+.nx-loc small{ display:block; font-size:9.5px; letter-spacing:.1em; color:var(--muted); }
+.nx-loc b{ font-size:26px; line-height:1.1; font-family:"IBM Plex Mono",monospace; }
+.nx-desc{ font-weight:700; font-size:15.5px; line-height:1.25; overflow-wrap:anywhere; }
+.nx-ref{ font-size:12px; color:var(--muted); }
 .wrap{ max-width:1080px; margin:0 auto; padding:22px 18px 80px; }
 .wrap.narrow{ max-width:480px; }
 
@@ -555,6 +576,7 @@ var Store = {
       await inBatches(snap.docs, DB_BATCH, function(d){
         return dbNs.doc("cargas/"+cargaId+"/items/"+d.id).delete();
       });
+      await this.limpiarTareas(cargaId);
       await dbNs.doc("cargas/"+cargaId).delete();
     } else {
       var s = lsRead();
@@ -569,9 +591,11 @@ var Store = {
       await inBatches(snap.docs, DB_BATCH, function(d){
         return dbNs.doc("cargas/"+cargaId+"/items/"+d.id).update({estado:"pendiente", asignadoA:null, registros:[]});
       });
+      await this.limpiarTareas(cargaId);
       await dbNs.doc("cargas/"+cargaId).update({operarios:[]});
     } else {
       var s = lsRead(); var c = s.cargas[cargaId]; if(!c) return;
+      delete c.tareas;
       Object.keys(c.items).forEach(function(ref){ c.items[ref].estado="pendiente"; c.items[ref].asignadoA=null; c.items[ref].registros=[]; });
       c.meta.operarios = [];
       lsWrite(s);
@@ -619,6 +643,39 @@ var Store = {
       var s = lsRead(); var it = s.cargas[cargaId].items[itemId];
       it.registros.splice(idx,1);
       it.estado = it.registros.length?"en_progreso":"pendiente";
+      lsWrite(s);
+    }
+  },
+
+  /* Tareas finalizadas por auxiliar: un documento por auxiliar en "cargas/<id>/tareas". */
+  onTareas(cargaId, cb){
+    if(USE_DB){
+      return dbNs.collection("cargas/"+cargaId+"/tareas").onSnapshot(function(snap){
+        cb(snap.docs.map(function(d){ return Object.assign({id:d.id}, d.data()); }));
+      }, function(){ cb([]); });
+    }
+    function push(){ var s = lsRead(), c = (s.cargas||{})[cargaId], t = (c && c.tareas) || {}; cb(Object.keys(t).map(function(id){ return Object.assign({id:id}, t[id]); })); }
+    lsListeners.push(push); push();
+    return function(){ lsListeners = lsListeners.filter(function(f){ return f!==push; }); };
+  },
+  async setTarea(cargaId, uid, data){
+    if(USE_DB){ await dbNs.doc("cargas/"+cargaId+"/tareas/"+uid).set(data); }
+    else { var s = lsRead(), c = s.cargas[cargaId]; c.tareas = c.tareas||{}; c.tareas[uid] = data; lsWrite(s); }
+  },
+  async limpiarTareas(cargaId){
+    if(USE_DB){
+      var snap = await dbNs.collection("cargas/"+cargaId+"/tareas").get();
+      await inBatches(snap.docs, DB_BATCH, function(d){ return dbNs.doc("cargas/"+cargaId+"/tareas/"+d.id).delete(); });
+    } else { var s = lsRead(); if(s.cargas && s.cargas[cargaId]) delete s.cargas[cargaId].tareas; lsWrite(s); }
+  },
+
+  /* Actualiza varios productos de una carga: updates = [{id, datos}] */
+  async updateItems(cargaId, updates){
+    if(USE_DB){
+      await inBatches(updates, DB_BATCH, function(u){ return dbNs.doc("cargas/"+cargaId+"/items/"+u.id).update(u.datos); });
+    } else {
+      var s = lsRead(), c = s.cargas[cargaId];
+      updates.forEach(function(u){ if(c.items[u.id]) Object.assign(c.items[u.id], u.datos); });
       lsWrite(s);
     }
   },
@@ -712,6 +769,8 @@ var state = {
   usuariosListos: false,
   adminTab: "consolidado",
   _consol: null,
+  tareas: [],
+  _autoAbierta: false,
   _filtroCiudad: "",
   _loginCo: coDesdeUrl(),
   cargas: [],
@@ -846,6 +905,16 @@ function renderSyncBadge(){
 }
 function renderTopbar(){
   var id = state.identity;
+  if(id.rol==="operario"){
+    /* Barra mínima para el auxiliar: deja la pantalla libre para el lector. */
+    var partes = String(id.nombre).trim().split(/\s+/);
+    var corto = partes.length>=3 ? partes[0]+" "+partes[partes.length-2] : partes.join(" ");
+    return '<div class="topbar compact"><div class="brand"><div class="mark">'+iconSemaforo()+'</div></div>'+
+      '<div class="who"><span class="name">'+esc(corto)+'</span>'+
+        '<span class="sync-dot '+(state.syncMode==="db"?"ok":"local")+'" title="'+(state.syncMode==="db"?"Sincronizado":"Sin sincronizar")+'"></span>'+
+        '<button id="themeToggle" title="Cambiar apariencia">'+(getTheme()==="dark"?"☀️":"🌙")+'</button>'+
+        '<button id="logoutBtn">Salir</button></div></div>';
+  }
   return '<div class="topbar">'+
     '<div class="brand"><div class="mark">'+iconSemaforo()+'</div><div><b>Semáforos</b><div class="sub">PRUEBAS · EJE CAFETERO</div></div></div>'+
     '<div class="who">'+renderSyncBadge()+'<span>'+esc(ROL_LABEL[id.rol]||id.rol)+(id.rol!=="administrador"&&id.ciudad?" · "+esc(id.ciudad):"")+' — <span class="name">'+esc(id.nombre)+'</span></span>'+
@@ -857,7 +926,7 @@ function wireTopbar(){
   var b = root.querySelector("#logoutBtn");
   if(b) b.onclick = function(){
     clearIdentity();
-    state._loginCo = coDesdeUrl(); state._ix = null; state._filtroCiudad = "";
+    state._loginCo = coDesdeUrl(); state._ix = null; state._filtroCiudad = ""; state._autoAbierta = false;
     if(state.unsubItems) state.unsubItems();
     setState({identity:null, currentCargaId:null, items:[], unsubItems:null, view:"list"});
   };
@@ -1139,6 +1208,23 @@ function renderCoordinadorList(){
   root.querySelector("#btnUpload").onclick = function(){ showUploadModal(); };
 }
 
+/* Lee una columna del Excel por cualquiera de sus nombres posibles (sin importar tildes, mayúsculas ni espacios). */
+function colExcel(row, nombres){
+  var buscados = nombres.map(slugNombre), claves = Object.keys(row);
+  for(var i=0;i<claves.length;i++){ if(buscados.indexOf(slugNombre(claves[i]))>-1) return row[claves[i]]; }
+  return "";
+}
+/* Texto del Excel -> id de un auxiliar de la ciudad (nombre completo o primer nombre si es único). */
+function resolverAsignadoCiudad(texto, ciudad){
+  var t = slugNombre(texto); if(!t) return null;
+  var aux = usuariosDeCiudad(ciudad, "operario");
+  var exact = aux.filter(function(u){ return slugNombre(u.nombre)===t; });
+  if(exact.length===1) return exact[0].id;
+  var porPrimer = aux.filter(function(u){ return slugNombre(primerNombre(u.nombre))===t; });
+  return porPrimer.length===1 ? porPrimer[0].id : null;
+}
+function limpiarUbic(v){ var s = String(v==null?"":v).trim(); return s==="" ? null : s; }
+
 function showUploadModal(){
   var idn = state.identity, esAdmin = idn.rol==="administrador";
   var m = document.createElement("div");
@@ -1148,7 +1234,7 @@ function showUploadModal(){
     (esAdmin
       ? '<div class="field"><label>Ciudad de la carga</label><select id="upCiudad">'+CIUDADES.map(function(c){ return '<option value="'+esc(c.nombre)+'"'+(state._filtroCiudad===c.nombre?" selected":"")+'>'+esc(c.nombre)+' · C.O. '+c.co+'</option>'; }).join("")+'</select></div>'
       : '<p class="hint" style="margin-bottom:8px;">La carga quedará en <b>'+esc(idn.ciudad)+'</b>. Solo los usuarios de esa ciudad (y el administrador) la verán.</p>')+
-    '<p class="hint" style="margin-bottom:12px;">Selecciona el Excel exportado de SIESA (opción "cantidades en unidades de empaque"). Se leen las columnas: Bodega, Desc. bodega, Referencia, Desc. item, U.M., Factor U.M., Existencia, GRUPO SHOPPER, LINEA PROVEEDOR, MARCA, Código barra principal, Costo prom. unit./tot., Calidad Perecedero. Si el archivo trae una columna opcional <b>"Asignar a"</b> con el <b>nombre</b> del auxiliar, esa asignación se precarga cuando coincide con un usuario de la ciudad (igual podrás ajustarla luego).</p>'+
+    '<p class="hint" style="margin-bottom:12px;">Selecciona el Excel exportado de SIESA (opción "cantidades en unidades de empaque"). Se leen las columnas: Bodega, Desc. bodega, Referencia, Desc. item, U.M., Factor U.M., Existencia, GRUPO SHOPPER, LINEA PROVEEDOR, MARCA, Código barra principal, Costo prom. unit./tot., Calidad Perecedero. Opcionales: <b>"Asignar a"</b> (nombre del auxiliar, se precarga si coincide con un usuario de la ciudad) y <b>"Ubicación"</b> (número de posición para el recorrido guiado). También puedes importar la asignación después, dentro de la carga.</p>'+
     '<div class="field"><input type="file" id="fileInput" accept=".xlsx,.xls"></div>'+
     '<div class="field" id="fileStatus" style="font-size:13px;color:var(--muted);"></div>'+
     '<button class="btn primary block" id="mConfirm" disabled>Crear carga</button>'+
@@ -1156,15 +1242,7 @@ function showUploadModal(){
   document.body.appendChild(m);
   var parsed = null;
   function ciudadElegida(){ var s = m.querySelector("#upCiudad"); return s ? s.value : idn.ciudad; }
-  /* "Asignar a" del Excel -> id de usuario auxiliar de la ciudad (nombre completo o primer nombre único) */
-  function resolverAsignado(texto, ciudad){
-    var t = slugNombre(texto); if(!t) return null;
-    var aux = usuariosDeCiudad(ciudad, "operario");
-    var exact = aux.filter(function(u){ return slugNombre(u.nombre)===t; });
-    if(exact.length===1) return exact[0].id;
-    var porPrimer = aux.filter(function(u){ return slugNombre(primerNombre(u.nombre))===t; });
-    return porPrimer.length===1 ? porPrimer[0].id : null;
-  }
+  var resolverAsignado = resolverAsignadoCiudad;
   m.querySelector("#mClose").onclick = function(){ m.remove(); };
   m.onclick = function(e){ if(e.target===m) m.remove(); };
   m.querySelector("#fileInput").onchange = function(e){
@@ -1193,7 +1271,8 @@ function showUploadModal(){
             perecedero: String(r["Calidad Perecedero"]||"").trim().toLowerCase(),
             bodega: String(r["Bodega"]||"").trim(),
             bodegaDesc: String(r["Desc. bodega"]||"").trim(),
-            asignarTexto: String(r["Asignar a"]||"").trim()
+            asignarTexto: String(colExcel(r, ["Asignar a","Auxiliar","Asignado a"])||"").trim(),
+            ubicacion: limpiarUbic(colExcel(r, ["Ubicación","Ubicacion","Posición","Posicion","Ubic"]))
           };
         }).filter(function(x){ return x.referencia && x.perecedero==="si"; });
         if(!mapped.length){ status.innerHTML = '<span style="color:var(--danger);">No se encontraron filas con Calidad Perecedero = "si". Revisa el archivo.</span>'; return; }
@@ -1232,8 +1311,8 @@ function showUploadModal(){
 
 function openCarga(id){
   if(state.unsubItems) state.unsubItems();
-  var unsub = Store.onItems(id, function(items){ setState({items:items}); });
-  setState({currentCargaId:id, view:"detail", unsubItems:unsub, selectedIds:{}});
+  state.tareas = [];
+  setState({currentCargaId:id, view:"detail", unsubItems:suscribirCarga(id), selectedIds:{}});
 }
 
 /* ================= coordinador: carga detail ================= */
@@ -1375,18 +1454,37 @@ function renderAsignarTab(items, operarios){
       '<button class="btn primary" id="btnAssign">Asignar</button>'+
       '<button class="btn" id="btnAutoAssign">Repartir equitativo</button>'+
       '<button class="btn" id="btnSelAll">Seleccionar todas</button>'+
+      '<button class="btn" id="btnImportAsig">Importar asignación (Excel)</button>'+
     '</div>'+
   '</div>';
 
+  /* avance por auxiliar */
+  var porAux = {};
+  items.forEach(function(it){
+    if(!it.asignadoA) return;
+    var o = porAux[it.asignadoA] || (porAux[it.asignadoA] = {id:it.asignadoA, asig:0, hechas:0});
+    o.asig++; if(it.estado==="finalizado") o.hechas++;
+  });
+  var filasAux = Object.keys(porAux).map(function(k){ return porAux[k]; }).sort(function(a,b){ return String(nombreDe(a.id)).localeCompare(String(nombreDe(b.id))); });
+  if(filasAux.length){
+    html += '<div class="card" style="margin-bottom:14px;padding:0;"><div class="tablewrap"><table><thead><tr><th>Auxiliar</th><th>Asignadas</th><th>Contadas</th><th>Pendientes</th><th>Tarea</th></tr></thead><tbody>'+
+      filasAux.map(function(o){
+        var t = (state.tareas||[]).filter(function(x){ return x.id===o.id; })[0], pend = o.asig-o.hechas;
+        return '<tr><td>'+esc(nombreDe(o.id))+'</td><td class="num">'+o.asig+'</td><td class="num">'+o.hechas+'</td><td class="num">'+pend+'</td><td>'+
+          (t ? '<span class="pill '+(pend?"amber":"green")+' dot">Finalizada'+(t.pendientes?' con '+t.pendientes+' pend.':'')+'</span>' : '<span class="pill neutral dot">En curso</span>')+'</td></tr>';
+      }).join("")+'</tbody></table></div></div>';
+  }
+
   html += '<div class="card" style="padding:0;">'+
     '<div class="tablewrap"><table><thead><tr>'+
-      '<th></th><th>Referencia</th><th>Descripción</th><th>Grupo Shopper</th><th>Asignado a</th><th>Estado</th><th>Lotes</th>'+
+      '<th></th><th>Referencia</th><th>Ubic.</th><th>Descripción</th><th>Grupo Shopper</th><th>Asignado a</th><th>Estado</th><th>Lotes</th>'+
     '</tr></thead><tbody>';
   items.forEach(function(it){
     var estPill = it.estado==="finalizado" ? '<span class="pill green dot">Finalizado</span>' : it.estado==="en_progreso" ? '<span class="pill amber dot">En progreso</span>' : '<span class="pill neutral dot">Pendiente</span>';
     html += '<tr>'+
       '<td><input type="checkbox" class="rowchk" data-id="'+esc(it.id)+'" '+(state.selectedIds[it.id]?"checked":"")+'></td>'+
       '<td class="mono">'+esc(it.referencia)+'</td>'+
+      '<td class="num">'+esc(it.ubicacion==null?"":it.ubicacion)+'</td>'+
       '<td>'+esc(it.descItem)+'</td>'+
       '<td style="max-width:180px;">'+esc((it.grupoShopper||"").split(" - ")[1]||it.grupoShopper||"")+'</td>'+
       '<td>'+(it.asignadoA?esc(nombreDe(it.asignadoA)):'<span class="hint">sin asignar</span>')+'</td>'+
@@ -1396,6 +1494,64 @@ function renderAsignarTab(items, operarios){
   });
   html += '</tbody></table></div></div>';
   return html;
+}
+
+/* Importa la matriz de asignación (columnas: Referencia, Asignar a / Auxiliar, Ubicación) y la aplica a la carga abierta. */
+function showImportAsignacion(){
+  var carga = cargaActual(), ciudad = carga.ciudad || null;
+  var m = document.createElement("div");
+  m.className = "modal-bg";
+  m.innerHTML = '<div class="modal" style="max-width:600px;">'+
+    '<div class="modal-head"><h2 style="font-size:17px;">Importar asignación desde Excel</h2><button id="iaClose">×</button></div>'+
+    '<p class="hint" style="margin-bottom:10px;">Columnas: <b>Referencia</b>, <b>Asignar a</b> (nombre del auxiliar) y <b>Ubicación</b> (número; puede repetirse). Se actualizan solo las referencias que ya están en esta carga'+(ciudad?' y los auxiliares de '+esc(ciudad):'')+'. El recorrido del auxiliar sigue la ubicación y luego el código de la referencia.</p>'+
+    '<div class="field"><input type="file" id="iaFile" accept=".xlsx,.xls"></div>'+
+    '<div id="iaPreview" style="max-height:260px;overflow:auto;font-size:13px;"></div>'+
+    '<button class="btn primary block" id="iaOk" disabled style="margin-top:12px;">Aplicar</button></div>';
+  document.body.appendChild(m);
+  var updates = [];
+  m.querySelector("#iaClose").onclick = function(){ m.remove(); };
+  m.onclick = function(e){ if(e.target===m) m.remove(); };
+  m.querySelector("#iaFile").onchange = function(e){
+    var f = e.target.files[0]; if(!f) return;
+    var reader = new FileReader();
+    reader.onload = function(ev){
+      var box = m.querySelector("#iaPreview");
+      try{
+        var wb = XLSX.read(ev.target.result, {type:"array"});
+        var rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], {defval:""});
+        var porRef = {}; state.items.forEach(function(it){ porRef[String(it.referencia).trim()] = it; });
+        updates = []; var sinRef = [], sinAux = {};
+        rows.forEach(function(r){
+          var ref = String(colExcel(r, ["Referencia","Código","Codigo"])||"").trim(); if(!ref) return;
+          var it = porRef[ref];
+          if(!it){ sinRef.push(ref); return; }
+          var txt = String(colExcel(r, ["Asignar a","Auxiliar","Asignado a"])||"").trim();
+          var datos = {ubicacion: limpiarUbic(colExcel(r, ["Ubicación","Ubicacion","Posición","Posicion","Ubic"]))};
+          if(txt){
+            var uid = resolverAsignadoCiudad(txt, ciudad || (state.identity.ciudad));
+            if(uid) datos.asignadoA = uid; else sinAux[txt] = true;
+          }
+          updates.push({id:it.id, datos:datos});
+        });
+        var nAsig = updates.filter(function(u){ return u.datos.asignadoA; }).length;
+        var nUb = updates.filter(function(u){ return u.datos.ubicacion!=null; }).length;
+        box.innerHTML = '<p><b>'+updates.length+'</b> referencias coinciden con la carga · <b>'+nAsig+'</b> con auxiliar · <b>'+nUb+'</b> con ubicación.</p>'+
+          (Object.keys(sinAux).length ? '<p style="color:var(--danger);">Auxiliares no encontrados en la ciudad (esas filas quedan sin asignar): '+esc(Object.keys(sinAux).join(", "))+'</p>' : '')+
+          (sinRef.length ? '<p class="hint">Referencias que no están en la carga ('+sinRef.length+'): '+esc(sinRef.slice(0,12).join(", "))+(sinRef.length>12?"…":"")+'</p>' : '');
+        var b = m.querySelector("#iaOk"); b.disabled = !updates.length; b.textContent = updates.length ? "Aplicar a "+updates.length+" referencias" : "Nada que aplicar";
+      }catch(err){ box.innerHTML = '<p style="color:var(--danger);">No se pudo leer el archivo: '+esc(err.message||err)+'</p>'; }
+    };
+    reader.readAsArrayBuffer(f);
+  };
+  m.querySelector("#iaOk").onclick = async function(){
+    try{
+      var ops = Array.from(new Set(updates.filter(function(u){ return u.datos.asignadoA; }).map(function(u){ return u.datos.asignadoA; })));
+      var limpios = updates.map(function(u){ var d = {}; if(u.datos.asignadoA) d.asignadoA = u.datos.asignadoA; if(u.datos.ubicacion!=null) d.ubicacion = u.datos.ubicacion; return {id:u.id, datos:d}; });
+      await Store.updateItems(state.currentCargaId, limpios);
+      for(var i=0;i<ops.length;i++){ await Store.assignItems(state.currentCargaId, [], ops[i]); }
+      m.remove(); await notify("Asignación aplicada a "+limpios.length+" referencias."); render();
+    }catch(err){ await notify("No se pudo aplicar: "+(err&&err.message?err.message:err)); }
+  };
 }
 
 function wireAsignarTab(){
@@ -1409,6 +1565,7 @@ function wireAsignarTab(){
     state.operarioInput = ""; render();
   };
   sel.onchange = function(e){ state.operarioInput = e.target.value; };
+  root.querySelector("#btnImportAsig").onclick = showImportAsignacion;
   root.querySelectorAll(".rowchk").forEach(function(c){
     c.onchange = function(){ state.selectedIds[c.getAttribute("data-id")] = c.checked; };
   });
@@ -1779,16 +1936,24 @@ function showQrModal(){
   }catch(e){ m.querySelector("#qrcanvas").textContent = "No se pudo generar el QR."; }
 }
 
-/* ================= operario: pick carga (home) ================= */
+/* ================= operario: elegir carga ================= */
+function suscribirCarga(id){
+  var u1 = Store.onItems(id, function(items){ setState({items:items}); });
+  var u2 = Store.onTareas(id, function(t){ setState({tareas:t}); });
+  return function(){ u1(); u2(); };
+}
+
 function renderOperarioHome(){
-  var html = renderTopbar() + '<div class="wrap narrow">';
   var cargas = cargasVisibles();
+  /* Con una sola carga se abre directo: el auxiliar llega de una vez a su primer producto. */
+  if(cargas.length===1 && !state._autoAbierta){ state._autoAbierta = true; openCargaOperario(cargas[0].id); return; }
+  var html = renderTopbar() + '<div class="wrap narrow compactwrap">';
   html += '<p class="eyebrow">Tus asignaciones · '+esc(state.identity.ciudad)+'</p><h1 style="font-size:20px;margin-bottom:14px;">Elige una carga</h1>';
   if(!cargas.length){
     html += '<div class="card empty">Aún no hay ninguna carga creada en '+esc(state.identity.ciudad)+'. Pide a tu coordinador o supervisor que la cree y te asigne referencias.</div>';
   } else {
     cargas.forEach(function(c){
-      html += '<div class="item-row" data-id="'+c.id+'"><div class="ico">📦</div><div class="info"><div class="t">'+esc(c.bodegaDesc||"Carga")+'</div><div class="m">'+esc(c.bodega||"")+' · '+(c.totalItems||0)+' referencias</div></div><div>→</div></div>';
+      html += '<div class="item-row" data-id="'+esc(c.id)+'"><div class="ico">📦</div><div class="info"><div class="t">'+esc(c.bodegaDesc||"Carga")+'</div><div class="m">'+esc(c.bodega||"")+' · '+(c.totalItems||0)+' referencias</div></div><div>→</div></div>';
     });
   }
   html += '</div>';
@@ -1799,74 +1964,104 @@ function renderOperarioHome(){
 
 function openCargaOperario(id){
   if(state.unsubItems) state.unsubItems();
-  var unsub = Store.onItems(id, function(items){ setState({items:items}); });
-  setState({currentCargaId:id, view:"mine", unsubItems:unsub});
+  state.tareas = [];
+  setState({currentCargaId:id, view:"mine", unsubItems:suscribirCarga(id), _search:""});
 }
 
-/* ================= operario: my items ================= */
+/* ================= operario: mis referencias ================= */
 function myItems(){
   return state.items.filter(function(it){ return it.asignadoA === state.identity.id; });
 }
+/* Con referencias asignadas se escanea/busca solo entre ellas; sin asignación, entre todas las de la carga. */
+function alcanceItems(){ var m = myItems(); return m.length ? m : state.items; }
+
+/* Orden del recorrido guiado: número de ubicación (varias referencias pueden compartirla) y luego código de referencia. */
+function ubicNum(u){ var n = parseFloat(String(u==null?"":u).replace(",",".")); return isNaN(n) ? null : n; }
+function ordenGuiado(a, b){
+  var x = ubicNum(a.ubicacion), y = ubicNum(b.ubicacion);
+  if(x!==y){ if(x===null) return 1; if(y===null) return -1; return x-y; }
+  return String(a.referencia).localeCompare(String(b.referencia), undefined, {numeric:true});
+}
+function pendientesOrdenados(mine){ return mine.filter(function(i){ return i.estado!=="finalizado"; }).sort(ordenGuiado); }
+function tieneGuia(mine){ return mine.some(function(i){ return i.ubicacion!=null && String(i.ubicacion).trim()!==""; }); }
+
+function filaProducto(it){
+  var ub = it.ubicacion!=null && String(it.ubicacion).trim()!=="" ? esc(it.ubicacion) : "·";
+  return '<div class="item-row" data-id="'+esc(it.id)+'"><div class="ico" style="font-weight:700;">'+ub+'</div><div class="info"><div class="t">'+esc(it.descItem)+'</div><div class="m">Ref. '+esc(it.referencia)+'</div></div></div>';
+}
 
 function renderOperarioMine(){
-  var mine = myItems();
-  var pend = mine.filter(function(i){return i.estado!=="finalizado";});
-  var done = mine.filter(function(i){return i.estado==="finalizado";});
-  var pct = mine.length ? Math.round(done.length/mine.length*100) : 0;
+  var mine = myItems(), pend = pendientesOrdenados(mine);
+  var hechas = mine.length - pend.length, pct = mine.length ? Math.round(hechas/mine.length*100) : 0;
+  var guiado = tieneGuia(mine);
+  var miTarea = (state.tareas||[]).filter(function(t){ return t.id===state.identity.id; })[0];
 
-  var html = renderTopbar() + '<div class="wrap narrow">';
-  html += '<button class="btn ghost sm" id="backBtn" style="margin-bottom:8px;">← Cambiar carga</button>';
-  html += '<p class="eyebrow">Mis referencias</p><h1 style="font-size:20px;margin-bottom:10px;">'+mine.length+' asignadas</h1>';
+  var html = renderTopbar() + '<div class="wrap narrow compactwrap">';
+  html += '<div class="mine-bar"><button class="btn ghost sm" id="backBtn">← Cargas</button>'+
+    (mine.length ? '<span class="hint" style="margin:0;"><b>'+hechas+'/'+mine.length+'</b> contadas</span>' : '')+'</div>';
+  if(mine.length) html += '<div class="progress-bar" style="margin-bottom:10px;"><div style="width:'+pct+'%;"></div></div>';
 
-  if(!mine.length){
-    html += '<div class="card empty">No tienes referencias asignadas en esta carga todavía. Pide a tu coordinador o supervisor que te asigne alguna.</div></div>';
-    root.innerHTML = html; wireTopbar();
-    root.querySelector("#backBtn").onclick = backToOperarioHome;
-    return;
+  if(miTarea){
+    html += '<div class="banner" style="padding:8px 12px;font-size:13px;">Finalizaste tu tarea el '+new Date(miTarea.finalizadaEn).toLocaleString("es-CO")+(miTarea.pendientes?' con '+miTarea.pendientes+' referencia(s) pendiente(s)':'')+'. Puedes seguir contando si lo necesitas.</div>';
   }
 
-  html += '<div class="card" style="margin-bottom:14px;"><div style="display:flex;justify-content:space-between;font-size:12.5px;color:var(--muted);margin-bottom:6px;"><span>Avance</span><span>'+done.length+'/'+mine.length+'</span></div><div class="progress-bar"><div style="width:'+pct+'%;"></div></div></div>';
+  /* siguiente producto del recorrido (solo si hay ubicaciones asignadas) */
+  if(guiado && pend.length){
+    var nx = pend[0], hay = nx.ubicacion!=null && String(nx.ubicacion).trim()!=="";
+    html += '<div class="next-card"><div class="nx-top"><span>Siguiente producto</span><span>'+(hechas+1)+' de '+mine.length+'</span></div>'+
+      '<div class="nx-row">'+(hay?'<div class="nx-loc"><small>UBIC.</small><b>'+esc(nx.ubicacion)+'</b></div>':'')+
+      '<div><div class="nx-desc">'+esc(nx.descItem)+'</div><div class="nx-ref">Ref. '+esc(nx.referencia)+'</div></div></div>'+
+      '<div style="text-align:right;margin-top:6px;"><button class="btn ghost sm" id="btnSinEscanear" type="button">Registrar sin escanear</button></div></div>';
+  } else if(guiado){
+    html += '<div class="banner" style="padding:8px 12px;font-size:13px;">Terminaste todas tus referencias asignadas. Ya puedes finalizar la tarea.</div>';
+  } else if(!mine.length){
+    html += '<div class="hint" style="margin:0 0 8px;">No tienes referencias asignadas: puedes escanear o buscar cualquier producto de la carga.</div>';
+  }
 
+  /* lector / cámara: lo principal de la pantalla */
   var modoScan = scanMode();
   if(modoScan==="lector"){
-    html += '<div class="card" style="margin-bottom:10px;"><label style="display:block;font-size:12.5px;font-weight:600;color:var(--ink-soft);margin-bottom:6px;text-transform:uppercase;letter-spacing:.04em;">Escanea con el lector</label>'+
-      '<input id="scanInput" inputmode="none" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="Apunta el lector al código y dispara" style="width:100%;padding:13px 14px;border:2px solid var(--accent);border-radius:var(--radius-md);background:var(--bg);">'+
-      '<div id="scanMsg" class="hint" style="margin-top:6px;">El código se reconoce solo al disparar.</div></div>';
+    html += '<div class="scan-card"><label for="scanInput">Escanea con el lector</label>'+
+      '<input id="scanInput" inputmode="none" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="Apunta y dispara">'+
+      '<div style="text-align:right;margin-top:4px;"><button class="btn ghost sm" id="btnModo" type="button">Usar cámara</button></div></div>';
   } else {
-    html += '<button class="scan-btn" id="btnScan">📷 Escanear código de barras</button>';
+    html += '<button class="scan-btn" id="btnScan">📷 Escanear código de barras</button>'+
+      '<div style="text-align:right;margin:-6px 0 8px;"><button class="btn ghost sm" id="btnModo" type="button">Usar lector de código</button></div>';
   }
-  html += '<div style="text-align:right;margin:-4px 0 10px;"><button class="btn ghost sm" id="btnModo" type="button">'+(modoScan==="lector"?"Usar cámara":"Usar lector de código")+'</button></div>';
-  html += '<div class="searchbar"><input id="searchInput" autocomplete="off" placeholder="Buscar por descripción..." value="'+esc(state._search||"")+'"></div>';
-  html += '<div id="mineListBox">'+buildMineListHtml(mine)+'</div>';
 
+  html += '<div class="searchbar" style="margin-bottom:8px;"><input id="searchInput" autocomplete="off" placeholder="Buscar por descripción…" value="'+esc(state._search||"")+'"></div>';
+  html += '<div id="mineListBox">'+buildMineListHtml()+'</div>';
+
+  if(mine.length){
+    html += '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:12px;">'+
+      '<button class="btn sm" id="btnPendientes" type="button">Ver mis pendientes ('+pend.length+')</button>'+
+      '<button class="btn sm" id="btnFinalizar" type="button">Finalizar tarea</button></div>';
+  }
   html += '</div>';
   root.innerHTML = html;
   wireTopbar();
   root.querySelector("#backBtn").onclick = backToOperarioHome;
   var btnScan = root.querySelector("#btnScan"); if(btnScan) btnScan.onclick = openScanner;
   root.querySelector("#btnModo").onclick = function(){ setScanMode(modoScan==="lector" ? "camara" : "lector"); render(); };
+  var bs = root.querySelector("#btnSinEscanear"); if(bs) bs.onclick = function(){ openEntry(pend[0].id, true, null); };
+  var bp = root.querySelector("#btnPendientes"); if(bp) bp.onclick = function(){ showPendientesModal(); };
+  var bf = root.querySelector("#btnFinalizar"); if(bf) bf.onclick = finalizarTarea;
   wireScanInput();
   wireMineListClicks();
-  var searchInput = root.querySelector("#searchInput");
-  searchInput.oninput = debounce(function(e){
+  root.querySelector("#searchInput").oninput = debounce(function(e){
     state._search = e.target.value;
     var box = root.querySelector("#mineListBox");
-    if(box){ box.innerHTML = buildMineListHtml(myItems()); wireMineListClicks(); }
+    if(box){ box.innerHTML = buildMineListHtml(); wireMineListClicks(); }
   }, 120);
 }
 
-function buildMineListHtml(mine){
-  var list = mine.filter(function(it){
-    if(!state._search) return true;
-    return it.descItem.toLowerCase().indexOf(state._search.toLowerCase())>-1;
-  });
-  if(!list.length){
-    return '<div class="card empty">Ningún producto asignado coincide con "'+esc(state._search||"")+'".</div>';
-  }
-  return list.map(function(it){
-    var badge = it.estado==="finalizado" ? '<span class="pill green dot">Listo</span>' : it.estado==="en_progreso" ? '<span class="pill amber dot">En curso</span>' : '<span class="pill neutral dot">Pendiente</span>';
-    return '<div class="item-row" data-id="'+it.id+'"><div class="ico">🏷️</div><div class="info"><div class="t">'+esc(it.descItem)+'</div><div class="m">Ref. '+esc(it.referencia)+' · '+(it.registros?it.registros.length:0)+' lote(s)</div></div>'+badge+'</div>';
-  }).join("");
+/* La lista solo aparece al buscar: el scroll se reemplaza por el buscador. */
+function buildMineListHtml(){
+  var q = (state._search||"").trim().toLowerCase();
+  if(!q) return "";
+  var list = alcanceItems().filter(function(it){ return (it.descItem||"").toLowerCase().indexOf(q)>-1 || String(it.referencia).toLowerCase().indexOf(q)>-1; }).sort(ordenGuiado);
+  if(!list.length) return '<div class="hint">Ningún producto coincide con "'+esc(state._search)+'".</div>';
+  return list.slice(0,8).map(filaProducto).join("") + (list.length>8 ? '<div class="hint">Hay '+(list.length-8)+' más: escribe más letras para afinar.</div>' : '');
 }
 
 function wireMineListClicks(){
@@ -1875,9 +2070,51 @@ function wireMineListClicks(){
   });
 }
 
+function showPendientesModal(){
+  var pend = pendientesOrdenados(myItems());
+  var m = document.createElement("div");
+  m.className = "modal-bg";
+  m.innerHTML = '<div class="modal"><div class="modal-head"><h2 style="font-size:17px;">Mis pendientes ('+pend.length+')</h2><button id="pdClose">×</button></div>'+
+    (pend.length ? pend.map(filaProducto).join("") : '<p class="hint">No tienes referencias pendientes.</p>')+'</div>';
+  document.body.appendChild(m);
+  m.querySelector("#pdClose").onclick = function(){ m.remove(); };
+  m.onclick = function(e){ if(e.target===m) m.remove(); };
+  m.querySelectorAll(".item-row").forEach(function(r){ r.onclick = function(){ var id = r.getAttribute("data-id"); m.remove(); openEntry(id, true, null); }; });
+}
+
+/* Seguro al finalizar: si quedan referencias asignadas sin contar, se avisa antes de cerrar la tarea. */
+function finalizarTarea(){
+  var mine = myItems(), pend = pendientesOrdenados(mine);
+  var m = document.createElement("div");
+  m.className = "modal-bg";
+  m.innerHTML = '<div class="modal" style="max-width:420px;">'+
+    (pend.length
+      ? '<h2 style="font-size:17px;margin-bottom:8px;">Tienes '+pend.length+' referencia(s) pendiente(s)</h2><p class="hint" style="margin-bottom:8px;">Aún no has contado estas referencias asignadas:</p>'+
+        pend.slice(0,6).map(filaProducto).join("")+(pend.length>6?'<p class="hint">…y '+(pend.length-6)+' más.</p>':'')
+      : '<h2 style="font-size:17px;margin-bottom:8px;">¿Finalizar tu tarea?</h2><p class="hint">Contaste todas tus referencias asignadas.</p>')+
+    '<div style="display:flex;gap:10px;justify-content:flex-end;flex-wrap:wrap;margin-top:14px;">'+
+      '<button class="btn primary" id="ftSeguir">'+(pend.length?"Seguir contando":"Cancelar")+'</button>'+
+      '<button class="btn '+(pend.length?"danger":"")+'" id="ftOk">'+(pend.length?"Finalizar de todos modos":"Finalizar tarea")+'</button>'+
+    '</div></div>';
+  document.body.appendChild(m);
+  m.querySelector("#ftSeguir").onclick = function(){ m.remove(); };
+  m.onclick = function(e){ if(e.target===m) m.remove(); };
+  m.querySelectorAll(".item-row").forEach(function(r){ r.onclick = function(){ var id = r.getAttribute("data-id"); m.remove(); openEntry(id, true, null); }; });
+  m.querySelector("#ftOk").onclick = async function(){
+    try{
+      await Store.setTarea(state.currentCargaId, state.identity.id, {
+        nombre:state.identity.nombre, finalizadaEn:new Date().toISOString(),
+        asignadas:mine.length, contadas:mine.length-pend.length, pendientes:pend.length
+      });
+      m.remove();
+      await notify(pend.length ? "Tarea finalizada con "+pend.length+" referencia(s) pendiente(s). Tu coordinador lo verá." : "Tarea finalizada. ¡Buen trabajo!");
+    }catch(err){ m.remove(); await notify("No se pudo finalizar la tarea: "+(err&&err.message?err.message:err)); }
+  };
+}
+
 function backToOperarioHome(){
   if(state.unsubItems) state.unsubItems();
-  setState({view:"home", currentCargaId:null, items:[], unsubItems:null});
+  setState({view:"home", currentCargaId:null, items:[], tareas:[], unsubItems:null});
 }
 
 /* ================= operario: scanner modal ================= */
@@ -1969,7 +2206,7 @@ function wireScanInput(){
 
 function handleScanResult(code, close, modal){
   try{ if(zxingReader) zxingReader.reset(); }catch(e){}
-  var mine = myItems(), nc = normCodigo(code);
+  var mine = alcanceItems(), nc = normCodigo(code);
   var match = mine.find(function(it){ return it.barcode && normCodigo(it.barcode)===nc && nc; });
   close();
   if(match){
@@ -1980,7 +2217,7 @@ function handleScanResult(code, close, modal){
 }
 
 function showMismatchModal(code){
-  var mine = myItems();
+  var mine = alcanceItems();
   var m = document.createElement("div");
   m.className = "modal-bg";
   m.innerHTML = '<div class="modal">'+
@@ -2023,7 +2260,9 @@ function renderOperarioEntry(){
   html += '<button class="btn ghost sm" id="backBtn" style="margin-bottom:8px;">← Volver a mi lista</button>';
 
   if(state._entryManualConfirm){
-    html += '<div class="banner warn">Producto confirmado manualmente por descripción (el código escaneado <code>'+esc(state._entryScannedCode||"")+'</code> no coincidía). Esto queda registrado.</div>';
+    html += '<div class="banner warn">'+(state._entryScannedCode
+      ? 'Producto confirmado manualmente por descripción (el código escaneado <code>'+esc(state._entryScannedCode)+'</code> no coincidía). Esto queda registrado.'
+      : 'Producto seleccionado sin escanear su código de barras. Esto queda registrado.')+'</div>';
   }
 
   html += '<div class="card" style="margin-bottom:14px;">'+
