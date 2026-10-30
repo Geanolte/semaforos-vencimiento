@@ -1786,7 +1786,15 @@ function renderOperarioMine(){
 
   html += '<div class="card" style="margin-bottom:14px;"><div style="display:flex;justify-content:space-between;font-size:12.5px;color:var(--muted);margin-bottom:6px;"><span>Avance</span><span>'+done.length+'/'+mine.length+'</span></div><div class="progress-bar"><div style="width:'+pct+'%;"></div></div></div>';
 
-  html += '<button class="scan-btn" id="btnScan">📷 Escanear código de barras</button>';
+  var modoScan = scanMode();
+  if(modoScan==="lector"){
+    html += '<div class="card" style="margin-bottom:10px;"><label style="display:block;font-size:12.5px;font-weight:600;color:var(--ink-soft);margin-bottom:6px;text-transform:uppercase;letter-spacing:.04em;">Escanea con el lector</label>'+
+      '<input id="scanInput" inputmode="none" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="Apunta el lector al código y dispara" style="width:100%;padding:13px 14px;border:2px solid var(--accent);border-radius:var(--radius-md);background:var(--bg);">'+
+      '<div id="scanMsg" class="hint" style="margin-top:6px;">El código se reconoce solo al disparar.</div></div>';
+  } else {
+    html += '<button class="scan-btn" id="btnScan">📷 Escanear código de barras</button>';
+  }
+  html += '<div style="text-align:right;margin:-4px 0 10px;"><button class="btn ghost sm" id="btnModo" type="button">'+(modoScan==="lector"?"Usar cámara":"Usar lector de código")+'</button></div>';
   html += '<div class="searchbar"><input id="searchInput" autocomplete="off" placeholder="Buscar por descripción..." value="'+esc(state._search||"")+'"></div>';
   html += '<div id="mineListBox">'+buildMineListHtml(mine)+'</div>';
 
@@ -1794,7 +1802,9 @@ function renderOperarioMine(){
   root.innerHTML = html;
   wireTopbar();
   root.querySelector("#backBtn").onclick = backToOperarioHome;
-  root.querySelector("#btnScan").onclick = openScanner;
+  var btnScan = root.querySelector("#btnScan"); if(btnScan) btnScan.onclick = openScanner;
+  root.querySelector("#btnModo").onclick = function(){ setScanMode(modoScan==="lector" ? "camara" : "lector"); render(); };
+  wireScanInput();
   wireMineListClicks();
   var searchInput = root.querySelector("#searchInput");
   searchInput.oninput = debounce(function(e){
@@ -1878,10 +1888,48 @@ function openScanner(){
   }
 }
 
+/* ---- modo de escaneo: lector (RF / pistola que "teclea" el código) o cámara ----
+   Por defecto depende de la ciudad (Pereira: lector); cada dispositivo puede cambiarlo y lo recuerda. */
+function scanMode(){
+  try{ var v = localStorage.getItem("semaforos_scanmode_v1"); if(v==="lector"||v==="camara") return v; }catch(e){}
+  var c = state.identity ? ciudadPorNombre(state.identity.ciudad) : null;
+  return c ? c.scan : "camara";
+}
+function setScanMode(v){ try{ localStorage.setItem("semaforos_scanmode_v1", v); }catch(e){} }
+function normCodigo(s){ return String(s==null?"":s).replace(/\D/g,"").replace(/^0+/,""); }
+
+function wireScanInput(){
+  var inp = root.querySelector("#scanInput"); if(!inp) return;
+  var t0 = 0, timer = null;
+  function enviar(){
+    clearTimeout(timer);
+    var code = inp.value.trim(); inp.value = ""; t0 = 0;
+    if(code) handleScanResult(code, function(){}, null);
+  }
+  inp.onkeydown = function(e){ if(e.key==="Enter" || e.key==="Tab"){ e.preventDefault(); enviar(); } };
+  /* Si el lector no envía Enter: ráfaga rápida de caracteres = lector; se envía al terminar la ráfaga. */
+  inp.oninput = function(){
+    var n = inp.value.length, now = Date.now();
+    if(n===1) t0 = now;
+    clearTimeout(timer);
+    timer = setTimeout(function(){
+      var len = inp.value.length;
+      if(len>=6 && t0 && (now - t0) / Math.max(len-1,1) < 60) enviar();
+    }, 140);
+  };
+  inp.onblur = function(){
+    setTimeout(function(){
+      var a = document.activeElement;
+      if(!document.querySelector(".modal-bg") && (!a || a===document.body) && document.body.contains(inp)) inp.focus();
+    }, 150);
+  };
+  inp.focus();
+}
+
 function handleScanResult(code, close, modal){
   try{ if(zxingReader) zxingReader.reset(); }catch(e){}
-  var mine = myItems();
-  var match = mine.find(function(it){ return it.barcode && it.barcode===code; });
+  var mine = myItems(), nc = normCodigo(code);
+  var match = mine.find(function(it){ return it.barcode && normCodigo(it.barcode)===nc && nc; });
   close();
   if(match){
     openEntry(match.id, false);
