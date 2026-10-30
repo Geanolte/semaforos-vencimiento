@@ -221,7 +221,14 @@ td.num{ font-variant-numeric:tabular-nums; font-family:"IBM Plex Mono",monospace
 .item-row:hover{ border-color:var(--accent); }
 .item-row .ico{ width:36px; height:36px; border-radius:12px; background:var(--surface-2); display:flex; align-items:center; justify-content:center; flex:0 0 auto; font-size:14px; }
 .item-row .info{ flex:1; min-width:0; }
-.item-row .info .t{ font-weight:600; font-size:14px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.item-row .info .t{ font-weight:600; font-size:14px; line-height:1.3; overflow-wrap:anywhere; }
+.user-row{ display:flex; align-items:center; gap:12px; padding:14px 14px; background:var(--surface); border:1.5px solid var(--border); border-radius:var(--radius-md); margin-bottom:9px; cursor:pointer; }
+.user-row:hover, .user-row:active{ border-color:var(--accent); background:var(--accent-bg); }
+.user-row .ico{ width:38px; height:38px; border-radius:12px; background:var(--surface-2); display:flex; align-items:center; justify-content:center; flex:0 0 auto; font-size:15px; }
+.user-row .nm{ font-weight:700; font-size:15.5px; line-height:1.25; overflow-wrap:anywhere; }
+.user-row .cg{ font-size:12.5px; color:var(--muted); line-height:1.3; margin-top:1px; }
+.grp-titulo{ font-family:"IBM Plex Mono",monospace; font-size:11px; letter-spacing:.1em; text-transform:uppercase; color:var(--muted); margin:14px 0 8px; }
+@media (max-width:420px){ .login-shell{ padding:10px; align-items:flex-start; } .login-card{ padding:16px; } .role-choice{ grid-template-columns:1fr 1fr; } }
 .item-row .info .m{ font-size:12px; color:var(--muted); font-family:"IBM Plex Mono",monospace; }
 
 .searchbar{ position:relative; margin-bottom:14px; }
@@ -767,8 +774,13 @@ function renderLogin(){
     cuerpo = '<button class="btn ghost sm" id="loginBack" style="margin-bottom:8px;">← Cambiar ciudad</button>'+
       '<p class="eyebrow">'+esc(nombreCiudad)+(co!=="REG"?" · C.O. "+co:"")+'</p>'+
       '<p class="hint" style="margin-bottom:10px;">Toca tu nombre para ingresar.</p>'+
-      (lista.length ? lista.map(function(u){
-        return '<div class="item-row" data-uid="'+esc(u.id)+'"><div class="ico">👤</div><div class="info"><div class="t">'+esc(u.nombre)+'</div><div class="m">'+esc(u.cargo||ROL_LABEL[u.rol]||"")+'</div></div><span class="pill neutral">'+esc(ROL_LABEL[u.rol]||u.rol)+'</span></div>';
+      (lista.length ? ["coordinador","operario","administrador"].map(function(rol){
+        var grupo = lista.filter(function(u){ return u.rol===rol; });
+        if(!grupo.length) return "";
+        var titulo = rol==="coordinador" ? "Coordinadores y supervisores" : rol==="operario" ? "Auxiliares de bodega" : "Administrador";
+        return '<p class="grp-titulo">'+titulo+'</p>'+grupo.map(function(u){
+          return '<div class="user-row" data-uid="'+esc(u.id)+'" role="button" tabindex="0"><div class="ico">👤</div><div><div class="nm">'+esc(u.nombre)+'</div><div class="cg">'+esc(u.cargo||ROL_LABEL[u.rol]||"")+'</div></div></div>';
+        }).join("");
       }).join("") : '<div class="card empty">Todavía no hay usuarios en esta ciudad. Pide al administrador que los registre.</div>');
   }
   root.innerHTML =
@@ -785,10 +797,12 @@ function renderLogin(){
   root.querySelectorAll("[data-co]").forEach(function(b){ b.onclick = function(){ state._loginCo = b.getAttribute("data-co"); render(); }; });
   var back = root.querySelector("#loginBack"); if(back) back.onclick = function(){ state._loginCo = null; render(); };
   root.querySelectorAll("[data-uid]").forEach(function(r){
-    r.onclick = function(){
+    function entrar(){
       var u = usuarios.filter(function(x){ return x.id===r.getAttribute("data-uid"); })[0];
       if(u) loginComo(u);
-    };
+    }
+    r.onclick = entrar;
+    r.onkeydown = function(e){ if(e.key==="Enter" || e.key===" "){ e.preventDefault(); entrar(); } };
   });
   var adm = root.querySelector("#admEntrar");
   if(adm){
