@@ -2578,9 +2578,11 @@ function showPendientesModal(){
   var m = document.createElement("div");
   m.className = "modal-bg";
   m.innerHTML = '<div class="modal"><div class="modal-head"><h2 style="font-size:17px;">Mis pendientes ('+pend.length+')</h2><button id="pdClose">×</button></div>'+
-    (pend.length ? pend.map(filaProducto).join("") : '<p class="hint">No tienes referencias pendientes.</p>')+'</div>';
+    (pend.length ? pend.map(filaProducto).join("") : '<p class="hint">No tienes referencias pendientes.</p>')+
+    '<button class="btn primary block" id="pdVolver" type="button" style="margin-top:12px;">← Volver y seguir contando</button></div>';
   document.body.appendChild(m);
   m.querySelector("#pdClose").onclick = function(){ m.remove(); };
+  m.querySelector("#pdVolver").onclick = function(){ m.remove(); };
   m.onclick = function(e){ if(e.target===m) m.remove(); };
   m.querySelectorAll(".item-row").forEach(function(r){ r.onclick = function(){ var id = r.getAttribute("data-id"); m.remove(); openEntry(id, true, null); }; });
 }
@@ -2731,9 +2733,11 @@ function showElegirBodegaModal(lista){
       var n = (it.registros||[]).length;
       return '<div class="item-row" data-id="'+esc(it.id)+'"><div class="ico" style="font-weight:700;">'+esc(it.bodega||"·")+'</div><div class="info"><div class="t">'+esc(bodegaTxt(it)||"Sin bodega")+'</div>'+
         '<div class="m">'+(it.estado==="finalizado"?"Contada":n?n+" lote(s) registrado(s)":"Pendiente")+'</div></div></div>';
-    }).join("")+'</div>';
+    }).join("")+
+    '<button class="btn block" id="ebVolver" type="button" style="margin-top:12px;">← Volver</button></div>';
   document.body.appendChild(m);
   m.querySelector("#ebClose").onclick = function(){ m.remove(); };
+  m.querySelector("#ebVolver").onclick = function(){ m.remove(); };
   m.onclick = function(e){ if(e.target===m) m.remove(); };
   m.querySelectorAll(".item-row").forEach(function(r){ r.onclick = function(){ var id = r.getAttribute("data-id"); m.remove(); openEntry(id, false); }; });
 }
