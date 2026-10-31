@@ -343,6 +343,14 @@ var REGIONAL = {co:"REG", nombre:"Eje Cafetero"};
 var ROL_LABEL = {administrador:"Administrador", coordinador:"Coordinador / Supervisor", operario:"Auxiliar de bodega"};
 function ciudadPorCo(co){ return CIUDADES.filter(function(c){ return c.co===co; })[0] || null; }
 function ciudadPorNombre(n){ return CIUDADES.filter(function(c){ return c.nombre===n; })[0] || null; }
+/* Una referencia puede estar en varias bodegas de la ciudad (general, no disponible, rentas…): cada par bodega + referencia es un ítem. */
+function bodegasDe(items){
+  var por = {};
+  items.forEach(function(x){ var c = String(x.bodega||"").trim(); if(c && !por[c]) por[c] = {cod:c, desc:String(x.bodegaDesc||"").trim()}; });
+  return Object.keys(por).sort().map(function(k){ return por[k]; });
+}
+function bodegaTxt(it){ var c = String(it.bodega||"").trim(), d = String(it.bodegaDesc||"").trim(); return c ? c+(d?" · "+d:"") : ""; }
+function claveItem(it){ var b = String(it.bodega||"").trim(), r = String(it.referencia).trim(); return (b ? b+"-" : "")+r; }
 function ciudadPorBodega(bodega){ var p = String(bodega||"").slice(0,2); return CIUDADES.filter(function(c){ return c.bodegaPref===p; })[0] || null; }
 function slugNombre(s){ return String(s||"").normalize("NFD").replace(/[̀-ͯ]/g,"").toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/^-+|-+$/g,""); }
 function userId(co, nombre){ return co+"-"+slugNombre(nombre); }
@@ -587,12 +595,12 @@ var Store = {
     if(USE_DB){
       await dbNs.doc("cargas/"+cargaId).set(meta);
       await inBatches(items, DB_BATCH, function(it){
-        return dbNs.doc("cargas/"+cargaId+"/items/"+it.referencia).set(Object.assign({estado:"pendiente", asignadoA:null, registros:[]}, it));
+        return dbNs.doc("cargas/"+cargaId+"/items/"+claveItem(it)).set(Object.assign({estado:"pendiente", asignadoA:null, registros:[]}, it));
       });
     } else {
       var s = lsRead(); s.cargas = s.cargas||{};
       var itemsMap = {};
-      items.forEach(function(it){ itemsMap[it.referencia] = Object.assign({estado:"pendiente", asignadoA:null, registros:[]}, it); });
+      items.forEach(function(it){ itemsMap[claveItem(it)] = Object.assign({estado:"pendiente", asignadoA:null, registros:[]}, it); });
       s.cargas[cargaId] = {meta: meta, items: itemsMap};
       lsWrite(s);
     }
@@ -1626,7 +1634,7 @@ function showUploadModal(){
     (esAdmin
       ? '<div class="field"><label>Ciudad de la carga</label><select id="upCiudad">'+CIUDADES.map(function(c){ return '<option value="'+esc(c.nombre)+'"'+(state._filtroCiudad===c.nombre?" selected":"")+'>'+esc(c.nombre)+' · C.O. '+c.co+'</option>'; }).join("")+'</select></div>'
       : '<p class="hint" style="margin-bottom:8px;">La carga quedará en <b>'+esc(idn.ciudad)+'</b>. Solo los usuarios de esa ciudad (y el administrador) la verán.</p>')+
-    '<p class="hint" style="margin-bottom:12px;">Selecciona el Excel exportado de SIESA (con la <b>Existencia en unidades enteras</b>, no en cajas, y el costo promedio por unidad). Se leen las columnas: Bodega, Desc. bodega, Referencia, Desc. item, U.M., Factor U.M., Existencia, GRUPO SHOPPER, LINEA PROVEEDOR, MARCA, Código barra principal, Costo prom. unit./tot., Calidad Perecedero. Opcionales: <b>"Asignar a"</b> (nombre del auxiliar, se precarga si coincide con un usuario de la ciudad) y <b>"Ubicación"</b> (número de posición para el recorrido guiado). También puedes importar la asignación después, dentro de la carga.</p>'+
+    '<p class="hint" style="margin-bottom:12px;">Selecciona el Excel exportado de SIESA (con la <b>Existencia en unidades enteras</b>, no en cajas, y el costo promedio por unidad). Se leen las columnas: Bodega, Desc. bodega, Referencia, Desc. item, U.M., Factor U.M., Existencia, GRUPO SHOPPER, LINEA PROVEEDOR, MARCA, Código barra principal, Costo prom. unit./tot., Calidad Perecedero. El archivo puede traer <b>varias bodegas</b> (por ejemplo general, no disponible y rentas): una misma referencia queda registrada en cada una. Opcionales: <b>"Asignar a"</b> (nombre del auxiliar, se precarga si coincide con un usuario de la ciudad) y <b>"Ubicación"</b> (número de posición para el recorrido guiado). También puedes importar la asignación después, dentro de la carga.</p>'+
     '<div class="field"><input type="file" id="fileInput" accept=".xlsx,.xls"></div>'+
     '<div class="field" id="fileStatus" style="font-size:13px;color:var(--muted);"></div>'+
     '<button class="btn primary block" id="mConfirm" disabled>Crear carga</button>'+
@@ -1670,7 +1678,9 @@ function showUploadModal(){
         if(!mapped.length){ status.innerHTML = '<span style="color:var(--danger);">No se encontraron filas con Calidad Perecedero = "si". Revisa el archivo.</span>'; return; }
         parsed = mapped;
         var conTexto = mapped.filter(function(x){ return x.asignarTexto; }).length;
-        var msg = 'Listo: <b>'+mapped.length+'</b> referencias perecederas en bodega <b>'+esc(mapped[0].bodega)+' - '+esc(mapped[0].bodegaDesc)+'</b>.';
+        var bods = bodegasDe(mapped), nRefs = new Set(mapped.map(function(x){ return x.referencia; })).size;
+        var msg = 'Listo: <b>'+mapped.length+'</b> registros perecederos ('+nRefs+' referencias) en '+(bods.length>1?'<b>'+bods.length+' bodegas</b>':'la bodega')+': '+
+          bods.map(function(b){ return '<b>'+esc(b.cod)+'</b> '+esc(b.desc); }).join(' · ')+'.';
         if(conTexto) msg += '<br>La columna "Asignar a" trae '+conTexto+' filas; se asignarán las que coincidan con un auxiliar de la ciudad elegida.';
         status.innerHTML = msg;
         m.querySelector("#mConfirm").disabled = false;
@@ -1683,9 +1693,10 @@ function showUploadModal(){
   m.querySelector("#mConfirm").onclick = async function(){
     if(!parsed) return;
     var ciudad = ciudadElegida(), c = ciudadPorNombre(ciudad);
-    var deBodega = ciudadPorBodega(parsed[0].bodega);
-    if(deBodega && deBodega.nombre!==ciudad){
-      var seguir = await askConfirm('La bodega '+parsed[0].bodega+' corresponde a '+deBodega.nombre+', pero la carga se está creando en '+ciudad+'. ¿Continuar de todos modos?');
+    var bodegas = bodegasDe(parsed);
+    var ajenas = bodegas.filter(function(b){ var d = ciudadPorBodega(b.cod); return d && d.nombre!==ciudad; });
+    if(ajenas.length){
+      var seguir = await askConfirm('La bodega '+ajenas.map(function(b){ return b.cod+' ('+ciudadPorBodega(b.cod).nombre+')'; }).join(', ')+' no corresponde a '+ciudad+', que es la ciudad donde se está creando la carga. ¿Continuar de todos modos?');
       if(!seguir) return;
     }
     var items = parsed.map(function(x){
@@ -1707,7 +1718,7 @@ function showUploadModal(){
       });
     }catch(e){}
     var operarios = Array.from(new Set(items.filter(function(x){return x.asignadoA;}).map(function(x){return x.asignadoA;})));
-    var meta = {bodega:parsed[0].bodega, bodegaDesc:parsed[0].bodegaDesc, ciudad:ciudad, co:c?c.co:"", creadoPor:idn.nombre, creadoPorId:idn.id, totalItems:items.length, operarios:operarios};
+    var meta = {bodega:bodegas.map(function(b){ return b.cod; }).join(" · "), bodegaDesc:bodegas.map(function(b){ return b.desc; }).filter(Boolean).join(" · "), bodegas:bodegas, ciudad:ciudad, co:c?c.co:"", creadoPor:idn.nombre, creadoPorId:idn.id, totalItems:items.length, operarios:operarios};
     var cid = await Store.createCarga(meta, items);
     m.remove();
     openCarga(cid);
@@ -1846,6 +1857,7 @@ function itemsAsignacionVisibles(items){
     if(fe && fe!=="sinasignar" && (it.estado||"pendiente")!==fe) return false;
     if(fa==="__sin__" && it.asignadoA) return false;
     if(fa && fa!=="__sin__" && it.asignadoA!==fa) return false;
+    if(state._asigBod && String(it.bodega||"")!==state._asigBod) return false;
     if(q && (String(it.referencia)+" "+(it.descItem||"")).toLowerCase().indexOf(q)<0) return false;
     return true;
   });
@@ -1868,6 +1880,7 @@ function renderAsignarTab(items, operarios){
       '<div class="field" style="flex:1;min-width:200px;margin-bottom:0;"><label>Asignar seleccionadas a'+(carga.ciudad?' · '+esc(carga.ciudad):'')+'</label>'+
         '<select id="opSelect"><option value="">Elige un auxiliar…</option>'+opcionesAux+'</select>'+
         (aux.length?'':'<p class="hint">No hay auxiliares registrados'+(carga.ciudad?' en '+esc(carga.ciudad):'')+'. Créalos en la pestaña "Usuarios".</p>')+
+        (bodegasDe(items).length>1 ? '<label class="assign-check" style="margin-top:6px;font-size:13px;"><input type="checkbox" id="asigTodasBod"'+(state._asigTodasBod?" checked":"")+'> <span>Asignar también la misma referencia en las demás bodegas</span></label>' : '')+
       '</div>'+
       '<button class="btn primary" id="btnAssign">Asignar</button>'+
       '<button class="btn" id="btnAutoAssign">Repartir equitativo</button>'+
@@ -1898,6 +1911,8 @@ function renderAsignarTab(items, operarios){
   /* filtros: estado, auxiliar y búsqueda */
   var cnt = {todas:items.length, sinasignar:0, pendiente:0, en_progreso:0, finalizado:0};
   items.forEach(function(it){ if(!it.asignadoA) cnt.sinasignar++; var e = it.estado||"pendiente"; cnt[e] = (cnt[e]||0)+1; });
+  var bodsCarga = bodegasDe(items);
+  if(state._asigBod && !bodsCarga.some(function(b){ return b.cod===state._asigBod; })) state._asigBod = "";
   var fe = state._asigEstado||"", vis = itemsAsignacionVisibles(items);
   var auxEnCarga = Array.from(new Set(items.filter(function(it){ return it.asignadoA; }).map(function(it){ return it.asignadoA; })))
     .sort(function(a,b){ return String(nombreDe(a)).localeCompare(String(nombreDe(b))); });
@@ -1906,21 +1921,25 @@ function renderAsignarTab(items, operarios){
       .map(function(c){ return '<button type="button" class="chipf'+(fe===c[0]?" on":"")+'" data-festado="'+c[0]+'">'+c[1]+' '+c[2]+'</button>'; }).join("")+'</div>'+
     '<div class="ix-bar"><select id="asigAux" class="grow" aria-label="Auxiliar"><option value="">Todos los auxiliares</option><option value="__sin__"'+(state._asigAux==="__sin__"?" selected":"")+'>Sin asignar</option>'+
       auxEnCarga.map(function(id){ return '<option value="'+esc(id)+'"'+(state._asigAux===id?" selected":"")+'>'+esc(nombreDe(id))+'</option>'; }).join("")+'</select>'+
+    (bodsCarga.length>1 ? '<select id="asigBod" class="grow" aria-label="Bodega"><option value="">Todas las bodegas</option>'+
+      bodsCarga.map(function(b){ return '<option value="'+esc(b.cod)+'"'+(state._asigBod===b.cod?" selected":"")+'>'+esc(b.cod+(b.desc?" · "+b.desc:""))+'</option>'; }).join("")+'</select>' : '')+
     '<input type="search" id="asigQ" class="grow" placeholder="Buscar referencia o descripción" value="'+esc(state._asigQ||"")+'">'+
     '<span class="hint" style="margin:0;">'+vis.length+' de '+items.length+' referencias</span></div>';
 
   html += '<div class="card" style="padding:0;">'+
     '<div class="tablewrap"><table><thead><tr>'+
-      '<th></th><th>Referencia</th><th>Ubic.</th><th>Descripción</th><th>Grupo Shopper</th><th>Asignado a</th><th>Estado</th><th>Lotes</th>'+
+      '<th></th><th>Bodega</th><th>Referencia</th><th>Ubic.</th><th>Descripción</th><th>Grupo Shopper</th><th>Marca</th><th>Asignado a</th><th>Estado</th><th>Lotes</th>'+
     '</tr></thead><tbody>';
   vis.forEach(function(it){
     var estPill = it.estado==="finalizado" ? '<span class="pill green dot">Finalizado</span>' : it.estado==="en_progreso" ? '<span class="pill amber dot">En progreso</span>' : '<span class="pill neutral dot">Pendiente</span>';
     html += '<tr>'+
       '<td><input type="checkbox" class="rowchk" data-id="'+esc(it.id)+'" '+(state.selectedIds[it.id]?"checked":"")+'></td>'+
+      '<td class="mono" title="'+esc(it.bodegaDesc||"")+'">'+esc(it.bodega||"")+'</td>'+
       '<td class="mono">'+esc(it.referencia)+'</td>'+
       '<td class="num">'+esc(it.ubicacion==null?"":it.ubicacion)+'</td>'+
       '<td>'+esc(it.descItem)+'</td>'+
       '<td style="max-width:180px;">'+esc((it.grupoShopper||"").split(" - ")[1]||it.grupoShopper||"")+'</td>'+
+      '<td>'+esc(it.marca||"")+'</td>'+
       '<td>'+(it.asignadoA?esc(nombreDe(it.asignadoA)):'<span class="hint">sin asignar</span>')+'</td>'+
       '<td>'+estPill+'</td>'+
       '<td class="num">'+(it.registros?it.registros.length:0)+'</td>'+
@@ -1953,19 +1972,21 @@ function showImportAsignacion(){
       try{
         var wb = XLSX.read(ev.target.result, {type:"array"});
         var rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], {defval:""});
-        var porRef = {}; state.items.forEach(function(it){ porRef[String(it.referencia).trim()] = it; });
+        var porRef = {}; state.items.forEach(function(it){ var k = String(it.referencia).trim(); (porRef[k] = porRef[k]||[]).push(it); });
         updates = []; var sinRef = [], sinAux = {};
         rows.forEach(function(r){
           var ref = String(colExcel(r, ["Referencia","Código","Codigo"])||"").trim(); if(!ref) return;
-          var it = porRef[ref];
-          if(!it){ sinRef.push(ref); return; }
+          var its = porRef[ref];
+          if(!its){ sinRef.push(ref); return; }
+          var bodFila = String(colExcel(r, ["Bodega"])||"").trim();
+          if(bodFila){ var f2 = its.filter(function(x){ return String(x.bodega||"")===bodFila; }); if(f2.length) its = f2; }
           var txt = String(colExcel(r, ["Asignar a","Auxiliar","Asignado a"])||"").trim();
           var datos = {ubicacion: limpiarUbic(colExcel(r, ["Ubicación","Ubicacion","Posición","Posicion","Ubic"]))};
           if(txt){
             var uid = resolverAsignadoCiudad(txt, ciudad || (state.identity.ciudad));
             if(uid) datos.asignadoA = uid; else sinAux[txt] = true;
           }
-          updates.push({id:it.id, datos:datos});
+          its.forEach(function(it){ updates.push({id:it.id, datos:Object.assign({}, datos)}); });
         });
         var nAsig = updates.filter(function(u){ return u.datos.asignadoA; }).length;
         var nUb = updates.filter(function(u){ return u.datos.ubicacion!=null; }).length;
@@ -2020,6 +2041,8 @@ function wireAsignarTab(){
   };
   root.querySelectorAll("[data-festado]").forEach(function(b){ b.onclick = function(){ state._asigEstado = b.getAttribute("data-festado"); render(); }; });
   var aa = root.querySelector("#asigAux"); if(aa) aa.onchange = function(e){ state._asigAux = e.target.value; render(); };
+  var ab = root.querySelector("#asigBod"); if(ab) ab.onchange = function(e){ state._asigBod = e.target.value; render(); };
+  var tb = root.querySelector("#asigTodasBod"); if(tb) tb.onchange = function(e){ state._asigTodasBod = e.target.checked; };
   var aq = root.querySelector("#asigQ");
   if(aq){
     aq.oninput = debounce(function(e){ state._asigQ = e.target.value; state._asigFocus = true; render(); }, 200);
@@ -2030,6 +2053,10 @@ function wireAsignarTab(){
     var op = state.operarioInput;
     if(!ids.length){ await notify("Selecciona al menos una referencia."); return; }
     if(!op){ await notify("Elige el auxiliar al que se asignan."); return; }
+    if(state._asigTodasBod){
+      var refs = {}; state.items.forEach(function(it){ if(state.selectedIds[it.id]) refs[String(it.referencia).trim()] = true; });
+      ids = state.items.filter(function(it){ return refs[String(it.referencia).trim()]; }).map(function(it){ return it.id; });
+    }
     try{ await Store.assignItems(state.currentCargaId, ids, op); }
     catch(err){ await notify("No se pudo asignar: "+(err&&err.message?err.message:err)); return; }
     state.selectedIds = {}; state.operarioInput = ""; render();
@@ -2037,12 +2064,20 @@ function wireAsignarTab(){
   root.querySelector("#btnAutoAssign").onclick = async function(){
     var elegidos = await askPickUsers("Repartir las referencias sin asignar entre:", auxiliaresDeLaCarga());
     if(!elegidos || !elegidos.length) return;
-    var unassigned = state.items.filter(function(it){return !it.asignadoA;}).map(function(it){return it.id;});
-    if(!unassigned.length){ await notify("No hay referencias sin asignar."); return; }
-    var perOp = Math.ceil(unassigned.length/elegidos.length);
+    /* Se reparte por referencia: todas las bodegas de una misma referencia quedan con el mismo auxiliar. */
+    var porRefSin = {}, ordenRefs = [];
+    state.items.forEach(function(it){
+      if(it.asignadoA) return;
+      var r = String(it.referencia).trim();
+      if(!porRefSin[r]){ porRefSin[r] = []; ordenRefs.push(r); }
+      porRefSin[r].push(it.id);
+    });
+    if(!ordenRefs.length){ await notify("No hay referencias sin asignar."); return; }
+    var perOp = Math.ceil(ordenRefs.length/elegidos.length);
     try{
       for(var j=0;j<elegidos.length;j++){
-        var slice = unassigned.slice(j*perOp,(j+1)*perOp);
+        var slice = [];
+        ordenRefs.slice(j*perOp,(j+1)*perOp).forEach(function(r){ slice = slice.concat(porRefSin[r]); });
         if(slice.length) await Store.assignItems(state.currentCargaId, slice, elegidos[j]);
       }
     }catch(err){ await notify("No se pudo repartir: "+(err&&err.message?err.message:err)); return; }
@@ -2053,7 +2088,7 @@ function wireAsignarTab(){
 function renderCruceTab(items){
   var html = '<div class="banner">Cruce automático: existencia de sistema (en unidades) vs. suma de las cantidades físicas (en unidades) registradas por el auxiliar. RN-07 / RF-13.</div>';
   html += '<div class="card" style="padding:0;"><div class="tablewrap"><table><thead><tr>'+
-    '<th>Referencia</th><th>Descripción</th><th>U.M.</th><th>Existencia sistema (und)</th><th>Físico contado (und)</th><th>Diferencia</th><th>Semáforo</th>'+
+    '<th>Bodega</th><th>Referencia</th><th>Descripción</th><th>U.M.</th><th>Existencia sistema (und)</th><th>Físico contado (und)</th><th>Diferencia</th><th>Semáforo</th>'+
   '</tr></thead><tbody>';
   items.forEach(function(it){
     var sisUnid = Math.round(it.existenciaUM||0);
@@ -2062,6 +2097,7 @@ function renderCruceTab(items){
     var pct = sisUnid ? Math.abs(diff)/sisUnid : (fisico?1:0);
     var estado = (!it.registros || !it.registros.length) ? {cls:"neutral",txt:"Sin contar"} : pct<=0.02 ? {cls:"green",txt:"Cuadra"} : pct<=0.10 ? {cls:"amber",txt:"Diferencia leve"} : {cls:"red",txt:"Diferencia alta"};
     html += '<tr>'+
+      '<td class="mono">'+esc(it.bodega||"")+'</td>'+
       '<td class="mono">'+esc(it.referencia)+'</td>'+
       '<td>'+esc(it.descItem)+'</td>'+
       '<td class="mono">'+esc(it.um)+'</td>'+
@@ -2087,7 +2123,7 @@ function ixLotes(items, ref){
     var cu = it.costoUnit||0; /* el archivo viene en unidades: costo promedio por unidad */
     (it.registros||[]).forEach(function(r){
       var cant = Number(r.cantidad)||0, d = diasEntre(r.fechaVenc, ref);
-      out.push({cod:it.referencia, desc:it.descItem||"", linea:it.lineaProveedor||"Sin línea", ciudad:it._ciudad||"", bodega:it.bodega||"", bdesc:it.bodegaDesc||"", cant:cant, fecha:r.fechaVenc, dias:d, banda:bandaDe(d), costo:cant*cu});
+      out.push({cod:it.referencia, desc:it.descItem||"", linea:it.lineaProveedor||"Sin línea", grupo:it.grupoShopper||"", marca:it.marca||"", ciudad:it._ciudad||"", bodega:it.bodega||"", bdesc:it.bodegaDesc||"", cu:cu, cant:cant, fecha:r.fechaVenc, dias:d, banda:bandaDe(d), costo:cant*cu});
     });
   });
   return out;
@@ -2109,7 +2145,7 @@ function renderIndicadoresTab(items, opts){
   var q = (S.q||"").trim().toLowerCase();
   function pasaFiltros(l, conCiudad){
     if(S.linea && l.linea!==S.linea) return false;
-    if(q && (l.cod+" "+l.desc).toLowerCase().indexOf(q)<0) return false;
+    if(q && (l.cod+" "+l.desc+" "+l.marca+" "+l.grupo).toLowerCase().indexOf(q)<0) return false;
     if(conCiudad && S.ciudad && l.ciudad!==S.ciudad) return false;
     if(conCiudad && S.bodega && l.bodega!==S.bodega) return false;
     return true;
@@ -2264,8 +2300,9 @@ function renderIndicadoresTab(items, opts){
     else { x = String(a[k]).toLowerCase(); y = String(b[k]).toLowerCase(); }
     return ((x<y?-1:x>y?1:0)*dir) || (a.dias-b.dias);
   });
-  var COLS = [["cod","Referencia"],["desc","Descripción"],["linea","Línea proveedor"],["cant","Unidades","r"],["fecha","Vence","r"],["dias","Días","r"],["costo","Costo existencia","r"],["banda","Semáforo"]];
-  if(consol) COLS.unshift(["ciudad","Ciudad"],["bodega","Bodega"]);
+  var COLS = [["bodega","Bodega"],["cod","Referencia"],["desc","Descripción"],["grupo","Grupo shopper"],["marca","Marca"],["linea","Línea proveedor"],["cant","Unidades","r"],["fecha","Vence","r"],["dias","Días","r"],["costo","Costo existencia","r"],["banda","Semáforo"]];
+  if(consol) COLS.unshift(["ciudad","Ciudad"]);
+  state._ixLista = lista; state._ixConsol = consol;
   var thead = '<tr>'+COLS.map(function(c){
     var sk = c[0]==="fecha"||c[0]==="banda" ? "dias" : c[0];
     var activo = c[0]===k;
@@ -2273,11 +2310,12 @@ function renderIndicadoresTab(items, opts){
   }).join("")+'</tr>';
   var tot = 0; lista.forEach(function(l){ tot += l.costo; });
   var tbody = lista.slice(0,S.lim).map(function(l){
-    return '<tr>'+(consol?'<td>'+esc(l.ciudad)+'</td><td class="mono">'+esc(l.bodega)+'</td>':'')+'<td class="mono">'+esc(l.cod)+'</td><td>'+esc(l.desc)+'</td><td>'+esc(l.linea)+'</td>'+
+    return '<tr>'+(consol?'<td>'+esc(l.ciudad)+'</td>':'')+'<td class="mono" title="'+esc(l.bdesc)+'">'+esc(l.bodega)+'</td><td class="mono">'+esc(l.cod)+'</td><td>'+esc(l.desc)+'</td><td>'+esc((l.grupo||"").split(" - ")[1]||l.grupo||"")+'</td><td>'+esc(l.marca)+'</td><td>'+esc(l.linea)+'</td>'+
       '<td class="num">'+fmtNum(l.cant,0)+'</td><td class="num">'+fmtFecha(l.fecha)+'</td><td class="num">'+l.dias+'</td>'+
       '<td class="num">'+fmtMoney(l.costo)+'</td><td>'+ixPill(l.banda)+'</td></tr>';
-  }).join("") || '<tr><td colspan="10" class="empty">No hay lotes para esta selección.</td></tr>';
-  html += '<section class="card ix"><div class="hd"><h3>Detalle de inventario</h3><p>'+fmtNum(lista.length,0)+' lotes · '+fmtMoney(tot)+'</p></div>'+
+  }).join("") || '<tr><td colspan="12" class="empty">No hay lotes para esta selección.</td></tr>';
+  html += '<section class="card ix"><div class="hd" style="display:flex;align-items:flex-start;justify-content:space-between;gap:10px;flex-wrap:wrap;"><div><h3>Detalle de inventario</h3><p>'+fmtNum(lista.length,0)+' lotes · '+fmtMoney(tot)+'</p></div>'+
+    '<button class="btn sm" id="ixExcel" type="button"'+(lista.length?"":" disabled")+'>Descargar detalle (Excel)</button></div>'+
     '<div class="ix-table tablewrap"><table id="ixTbl"><thead>'+thead+'</thead><tbody>'+tbody+'</tbody></table></div>'+
     (lista.length>S.lim ? '<button class="btn sm" id="ixDetMore" type="button" style="align-self:flex-start;">Mostrar '+Math.min(60,lista.length-S.lim)+' más ('+fmtNum(lista.length-S.lim,0)+' restantes)</button>' : '')+
   '</section>';
@@ -2308,6 +2346,18 @@ function wireIndicadoresTab(){
   root.querySelectorAll("[data-b]").forEach(function(b){ b.onclick = function(){ var id = b.getAttribute("data-b"); S.banda = S.banda===id ? null : id; S.lim = 60; render(); }; });
   root.querySelectorAll("[data-lin]").forEach(function(b){ b.onclick = function(){ var l = b.getAttribute("data-lin"); S.linea = S.linea===l ? "" : l; S.lim = 60; render(); }; });
   root.querySelectorAll("#ixMode [data-m]").forEach(function(b){ b.onclick = function(){ S.bmode = b.getAttribute("data-m"); render(); }; });
+  var ex = $("#ixExcel");
+  if(ex) ex.onclick = function(){
+    var ref = S.ref || todayISO(), consol = state._ixConsol, ciudadCarga = (cargaActual().ciudad)||"";
+    var filas = (state._ixLista||[]).map(function(l){
+      return {
+        "Ciudad":l.ciudad||ciudadCarga, "Bodega":l.bodega, "Desc. bodega":l.bdesc, "Código":l.cod, "Descripción":l.desc,
+        "Grupo shopper":l.grupo, "Marca":l.marca, "Línea proveedor":l.linea, "Costo unitario":Math.round(l.cu*100)/100,
+        "Unidades":l.cant, "Vence":fmtFecha(l.fecha), "Días":l.dias, "Costo total":Math.round(l.costo), "Semáforo":BANDA_POR_ID[l.banda].n
+      };
+    });
+    descargarExcel([{nombre:"Detalle de inventario", filas:filas}], "Detalle inventario "+(consol?"Eje Cafetero":(ciudadCarga||"carga"))+" "+ref+".xlsx");
+  };
   var am = $("#ixAlertMore"); if(am) am.onclick = function(){ S.alertAll = !S.alertAll; render(); };
   var dm = $("#ixDetMore"); if(dm) dm.onclick = function(){ S.lim += 60; render(); };
   root.querySelectorAll("#ixTbl th").forEach(function(th){
@@ -2328,7 +2378,7 @@ function filasLotes(items, carga, ref){
       var d = diasEntre(r.fechaVenc, ref), cant = Number(r.cantidad)||0;
       out.push({
         "Ciudad":(carga&&carga.ciudad)||it._ciudad||"", "Bodega":it.bodega||(carga&&carga.bodega)||"", "Desc. bodega":it.bodegaDesc||(carga&&carga.bodegaDesc)||"",
-        "Línea proveedor":it.lineaProveedor||"", "Código":it.referencia, "Descripción":it.descItem, "Marca":it.marca||"",
+        "Línea proveedor":it.lineaProveedor||"", "Código":it.referencia, "Descripción":it.descItem, "Grupo shopper":it.grupoShopper||"", "Marca":it.marca||"",
         "Costo unitario":Math.round(cu*100)/100, "Unidades":cant, "Empaque":it.um||"", "Vence":fmtFecha(r.fechaVenc),
         "Días":d, "Costo total":Math.round(cant*cu), "Semáforo":BANDA_POR_ID[bandaDe(d)].n, "Registrado por":nombreDe(r.capturadoPor)
       });
@@ -2343,8 +2393,8 @@ function filasCruce(items, carga){
     var contado = it.registros && it.registros.length;
     var pct = sis ? Math.abs(fis-sis)/sis : (fis?1:0);
     return {
-      "Ciudad":(carga&&carga.ciudad)||it._ciudad||"", "Bodega":it.bodega||(carga&&carga.bodega)||"", "Código":it.referencia, "Descripción":it.descItem,
-      "U.M.":it.um||"", "Existencia sistema (und)":sis,
+      "Ciudad":(carga&&carga.ciudad)||it._ciudad||"", "Bodega":it.bodega||(carga&&carga.bodega)||"", "Desc. bodega":it.bodegaDesc||(carga&&carga.bodegaDesc)||"", "Código":it.referencia, "Descripción":it.descItem,
+      "Grupo shopper":it.grupoShopper||"", "Marca":it.marca||"", "U.M.":it.um||"", "Existencia sistema (und)":sis,
       "Físico contado (und)":contado?fis:"", "Diferencia":contado?(fis-sis):"",
       "Estado":!contado?"Sin contar":pct<=0.02?"Cuadra":pct<=0.10?"Diferencia leve":"Diferencia alta",
       "Asignado a":nombreDe(it.asignadoA)
@@ -2431,14 +2481,16 @@ function ubicNum(u){ var n = parseFloat(String(u==null?"":u).replace(",",".")); 
 function ordenGuiado(a, b){
   var x = ubicNum(a.ubicacion), y = ubicNum(b.ubicacion);
   if(x!==y){ if(x===null) return 1; if(y===null) return -1; return x-y; }
-  return String(a.referencia).localeCompare(String(b.referencia), undefined, {numeric:true});
+  return String(a.referencia).localeCompare(String(b.referencia), undefined, {numeric:true}) || String(a.bodega||"").localeCompare(String(b.bodega||""));
 }
+/* Texto "Ref. X · Bodega" para identificar el producto cuando la carga tiene varias bodegas. */
+function refBodegaTxt(it){ return "Ref. "+it.referencia+(it.bodega?" · Bod. "+it.bodega+(it.bodegaDesc?" "+it.bodegaDesc:""):""); }
 function pendientesOrdenados(mine){ return mine.filter(function(i){ return i.estado!=="finalizado"; }).sort(ordenGuiado); }
 function tieneGuia(mine){ return mine.some(function(i){ return i.ubicacion!=null && String(i.ubicacion).trim()!==""; }); }
 
 function filaProducto(it){
   var ub = it.ubicacion!=null && String(it.ubicacion).trim()!=="" ? esc(it.ubicacion) : "·";
-  return '<div class="item-row" data-id="'+esc(it.id)+'"><div class="ico" style="font-weight:700;">'+ub+'</div><div class="info"><div class="t">'+esc(it.descItem)+'</div><div class="m">Ref. '+esc(it.referencia)+'</div></div></div>';
+  return '<div class="item-row" data-id="'+esc(it.id)+'"><div class="ico" style="font-weight:700;">'+ub+'</div><div class="info"><div class="t">'+esc(it.descItem)+'</div><div class="m">'+esc(refBodegaTxt(it))+'</div></div></div>';
 }
 
 function renderOperarioMine(){
@@ -2461,7 +2513,7 @@ function renderOperarioMine(){
     var nx = pend[0], hay = nx.ubicacion!=null && String(nx.ubicacion).trim()!=="";
     html += '<div class="next-card"><div class="nx-top"><span>Siguiente producto</span><span>'+(hechas+1)+' de '+mine.length+'</span></div>'+
       '<div class="nx-row">'+(hay?'<div class="nx-loc"><small>UBIC.</small><b>'+esc(nx.ubicacion)+'</b></div>':'')+
-      '<div><div class="nx-desc">'+esc(nx.descItem)+'</div><div class="nx-ref">Ref. '+esc(nx.referencia)+'</div></div></div>'+
+      '<div><div class="nx-desc">'+esc(nx.descItem)+'</div><div class="nx-ref">'+esc(refBodegaTxt(nx))+'</div></div></div>'+
       '<div style="text-align:right;margin-top:6px;"><button class="btn ghost sm" id="btnSinEscanear" type="button">Registrar sin escanear</button></div></div>';
   } else if(guiado){
     html += '<div class="banner" style="padding:8px 12px;font-size:13px;">Terminaste todas tus referencias asignadas. Ya puedes finalizar la tarea.</div>';
@@ -2658,13 +2710,32 @@ function wireScanInput(){
 function handleScanResult(code, close, modal){
   try{ if(zxingReader) zxingReader.reset(); }catch(e){}
   var mine = alcanceItems(), nc = normCodigo(code);
-  var match = mine.find(function(it){ return it.barcode && normCodigo(it.barcode)===nc && nc; });
+  var matches = mine.filter(function(it){ return it.barcode && normCodigo(it.barcode)===nc && nc; }).sort(ordenGuiado);
   close();
-  if(match){
-    openEntry(match.id, false);
+  if(matches.length===1){
+    openEntry(matches[0].id, false);
+  } else if(matches.length>1){
+    showElegirBodegaModal(matches);
   } else {
     showMismatchModal(code);
   }
+}
+
+/* El mismo producto está en varias bodegas: el auxiliar elige en cuál de ellas está contando. */
+function showElegirBodegaModal(lista){
+  var m = document.createElement("div");
+  m.className = "modal-bg";
+  m.innerHTML = '<div class="modal"><div class="modal-head"><h2 style="font-size:17px;">¿En qué bodega estás?</h2><button id="ebClose">×</button></div>'+
+    '<p class="hint" style="margin-bottom:8px;">'+esc(lista[0].descItem)+' está en varias bodegas. Elige la que estás contando.</p>'+
+    lista.map(function(it){
+      var n = (it.registros||[]).length;
+      return '<div class="item-row" data-id="'+esc(it.id)+'"><div class="ico" style="font-weight:700;">'+esc(it.bodega||"·")+'</div><div class="info"><div class="t">'+esc(bodegaTxt(it)||"Sin bodega")+'</div>'+
+        '<div class="m">'+(it.estado==="finalizado"?"Contada":n?n+" lote(s) registrado(s)":"Pendiente")+'</div></div></div>';
+    }).join("")+'</div>';
+  document.body.appendChild(m);
+  m.querySelector("#ebClose").onclick = function(){ m.remove(); };
+  m.onclick = function(e){ if(e.target===m) m.remove(); };
+  m.querySelectorAll(".item-row").forEach(function(r){ r.onclick = function(){ var id = r.getAttribute("data-id"); m.remove(); openEntry(id, false); }; });
 }
 
 function showMismatchModal(code){
@@ -2684,7 +2755,7 @@ function showMismatchModal(code){
     var box = m.querySelector("#mismatchResults");
     var list = mine.filter(function(it){ return !q || it.descItem.toLowerCase().indexOf(q.toLowerCase())>-1; }).slice(0,8);
     box.innerHTML = list.map(function(it){
-      return '<div class="item-row" data-id="'+it.id+'"><div class="ico">🏷️</div><div class="info"><div class="t">'+esc(it.descItem)+'</div><div class="m">Ref. '+esc(it.referencia)+'</div></div></div>';
+      return '<div class="item-row" data-id="'+it.id+'"><div class="ico">🏷️</div><div class="info"><div class="t">'+esc(it.descItem)+'</div><div class="m">'+esc(refBodegaTxt(it))+'</div></div></div>';
     }).join("") || '<div class="hint">Sin resultados.</div>';
     box.querySelectorAll(".item-row").forEach(function(r){
       r.onclick = function(){ m.remove(); openEntry(r.getAttribute("data-id"), true, code); };
@@ -2719,6 +2790,7 @@ function renderOperarioEntry(){
   html += '<div class="card" style="margin-bottom:14px;">'+
     '<p class="eyebrow">Ref. '+esc(it.referencia)+' · '+esc(it.um)+'</p>'+
     '<h1 style="font-size:19px;margin-bottom:8px;">'+esc(it.descItem)+'</h1>'+
+    (it.bodega ? '<div class="hint" style="margin-bottom:6px;"><span class="pill amber">Bodega '+esc(bodegaTxt(it))+'</span></div>' : '')+
     '<div class="hint">Código de barras SIESA: <span class="mono">'+esc(it.barcode||"—")+'</span></div>'+
     '<div class="hint">Grupo Shopper: '+esc(it.grupoShopper||"—")+'</div>'+
   '</div>';
