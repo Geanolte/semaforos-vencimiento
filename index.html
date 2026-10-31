@@ -777,6 +777,14 @@ var Store = {
      Si no hay Supabase (modo local o Claude), no hay dónde verificarla y se entra solo por nombre. */
   tieneClaves(){ return !!(USE_DB && dbNs && dbNs.rpc); },
   async verificarClave(usuario, clave){ return (await dbNs.rpc("verificar_clave", {p_usuario:usuario, p_clave:clave})) === true; },
+  /* Cada usuario crea su clave la primera vez; el superadministrador la puede restablecer. */
+  async tieneClave(id){ return (await dbNs.rpc("tiene_clave", {p_usuario:id})) === true; },
+  async crearClave(id, clave){ return (await dbNs.rpc("crear_clave", {p_usuario:id, p_clave:clave})) === true; },
+  async restablecerClave(objetivoId, claveAdmin){
+    var yo = slugNombre(primerNombre(state.identity.nombre));
+    return (await dbNs.rpc("restablecer_clave", {p_super:yo, p_clave:claveAdmin, p_objetivo:objetivoId})) === true;
+  },
+  async usuariosConClave(){ var r = await dbNs.rpc("usuarios_con_clave", {}); return Array.isArray(r) ? r : []; },
 
   async upsertUsuario(id, data){
     var body = Object.assign({activo:true, actualizadoEn:new Date().toISOString()}, data);
@@ -862,6 +870,62 @@ function coDesdeUrl(){
 }
 function rolOrden(r){ return r==="administrador" ? 0 : r==="coordinador" ? 1 : 2; }
 
+/* Cuadro para escribir una clave (oculta) y obtenerla como texto; null si cancela. */
+function askPassword(message){
+  return new Promise(function(resolve){
+    var m = document.createElement("div");
+    m.className = "modal-bg";
+    m.innerHTML = '<div class="modal" style="max-width:380px;"><p style="margin-bottom:10px;">'+esc(message)+'</p>'+
+      '<div class="field"><input id="pwIn" type="password" autocomplete="off"></div>'+
+      '<div style="display:flex;gap:10px;justify-content:flex-end;"><button class="btn" id="pwCancel">Cancelar</button><button class="btn primary" id="pwOk">Aceptar</button></div></div>';
+    document.body.appendChild(m);
+    var inp = m.querySelector("#pwIn"); inp.focus();
+    function close(v){ m.remove(); resolve(v); }
+    m.querySelector("#pwCancel").onclick = function(){ close(null); };
+    m.querySelector("#pwOk").onclick = function(){ close(inp.value); };
+    inp.onkeydown = function(e){ if(e.key==="Enter") close(inp.value); };
+    m.onclick = function(e){ if(e.target===m) close(null); };
+  });
+}
+
+/* Ingreso de coordinadores y auxiliares: clave propia, que se crea la primera vez. */
+async function entrarConClave(u){
+  if(u.activo===false || u.rol==="administrador" || !Store.tieneClaves()){ loginComo(u); return; }
+  var tiene;
+  try{ tiene = await Store.tieneClave(u.id); }
+  catch(err){ await notify("No se pudo verificar tu clave: "+(err&&err.message?err.message:err)); return; }
+  var m = document.createElement("div");
+  m.className = "modal-bg";
+  m.innerHTML = '<div class="modal" style="max-width:380px;"><div class="modal-head"><h2 style="font-size:17px;">'+esc(u.nombre)+'</h2><button id="ckClose">×</button></div>'+
+    (tiene
+      ? '<div class="field"><label>Tu clave</label><input id="ckClave" type="password" autocomplete="off" inputmode="text"></div>'+
+        '<p class="hint" style="margin-bottom:10px;">¿La olvidaste? Pídele a German (administrador) que la restablezca y podrás crear una nueva.</p>'
+      : '<p class="hint" style="margin-bottom:10px;">Es tu primer ingreso: crea tu clave (mínimo 4 caracteres; puede ser solo números). Recuérdala: si la olvidas, el administrador la restablece.</p>'+
+        '<div class="field"><label>Nueva clave</label><input id="ckClave" type="password" autocomplete="off"></div>'+
+        '<div class="field"><label>Repite la clave</label><input id="ckClave2" type="password" autocomplete="off"></div>')+
+    '<button class="btn primary block" id="ckOk">'+(tiene?"Entrar":"Crear clave y entrar")+'</button></div>';
+  document.body.appendChild(m);
+  var c1 = m.querySelector("#ckClave"); c1.focus();
+  m.querySelector("#ckClose").onclick = function(){ m.remove(); };
+  m.onclick = function(e){ if(e.target===m) m.remove(); };
+  async function enviar(){
+    var clave = c1.value;
+    try{
+      if(tiene){
+        if(!clave){ await notify("Escribe tu clave."); return; }
+        if(await Store.verificarClave(u.id, clave)){ m.remove(); loginComo(u); } else { c1.value = ""; await notify("Clave incorrecta."); }
+      } else {
+        if(clave.length<4){ await notify("La clave debe tener al menos 4 caracteres."); return; }
+        if(clave!==m.querySelector("#ckClave2").value){ await notify("Las dos claves no coinciden."); return; }
+        if(await Store.crearClave(u.id, clave)){ m.remove(); loginComo(u); }
+        else await notify("No se pudo crear la clave: ya existe una para este usuario. Intenta entrar con ella.");
+      }
+    }catch(err){ await notify("No se pudo completar el ingreso: "+(err&&err.message?err.message:err)); }
+  }
+  m.querySelector("#ckOk").onclick = enviar;
+  m.querySelectorAll("input").forEach(function(i){ i.onkeydown = function(e){ if(e.key==="Enter") enviar(); }; });
+}
+
 function loginComo(u){
   if(u.activo===false){ notify("Tu usuario está desactivado. Contacta al administrador."); return; }
   var identity = {id:u.id, nombre:u.nombre, rol:u.rol, ciudad:u.ciudad, co:u.co};
@@ -890,7 +954,7 @@ function renderLogin(){
   } else if(co==="REG" && Store.tieneClaves()){
     cuerpo = '<button class="btn ghost sm" id="loginBack" style="margin-bottom:8px;">← Cambiar ciudad</button>'+
       '<p class="eyebrow">Administrador · '+esc(REGIONAL.nombre)+'</p>'+
-      '<div class="field"><label>Usuario</label><input id="admUser" placeholder="Tu primer nombre" autocapitalize="none" autocomplete="username"></div>'+
+      '<div class="field"><label>Usuario</label><input id="admUser" name="usuario-admin" autocapitalize="none" autocomplete="off" spellcheck="false"></div>'+
       '<div class="field"><label>Clave</label><input id="admPass" type="password" autocomplete="current-password"></div>'+
       '<button class="btn primary block" id="admEntrar">Ingresar</button>';
   } else {
@@ -925,7 +989,7 @@ function renderLogin(){
   root.querySelectorAll("[data-uid]").forEach(function(r){
     function entrar(){
       var u = usuarios.filter(function(x){ return x.id===r.getAttribute("data-uid"); })[0];
-      if(u) loginComo(u);
+      if(u) entrarConClave(u);
     }
     r.onclick = entrar;
     r.onkeydown = function(e){ if(e.key==="Enter" || e.key===" "){ e.preventDefault(); entrar(); } };
@@ -1009,7 +1073,7 @@ function renderAdminNav(active){
 }
 function wireAdminNav(){
   root.querySelectorAll("[data-nav]").forEach(function(b){
-    b.onclick = function(){ state.adminTab = b.getAttribute("data-nav"); state.view = "list"; render(); };
+    b.onclick = function(){ state.adminTab = b.getAttribute("data-nav"); state.view = "list"; state._volverCarga = null; render(); };
   });
 }
 
@@ -1081,6 +1145,10 @@ function renderMatriz(){
   function optsAux(sel){ return '<option value="">Sin auxiliar</option>'+aux.map(function(u){ return '<option value="'+esc(u.id)+'"'+(sel===u.id?" selected":"")+'>'+esc(u.nombre)+'</option>'; }).join(""); }
 
   var html = renderTopbar() + '<div class="wrap">' + renderAdminNav("matriz");
+  if(state._volverCarga){
+    var cv = state.cargas.filter(function(c){ return c.id===state._volverCarga; })[0];
+    html += '<button class="btn ghost sm" id="mzVolver" style="margin-bottom:8px;">← Volver a la carga'+(cv&&cv.bodegaDesc?' · '+esc(cv.bodegaDesc):'')+'</button>';
+  }
   html += '<div class="mz-head"><div><h2>Matriz de asignación</h2><div class="sub">📍 '+esc(ciudad.nombre)+' · C.O. '+co+'</div>'+
     '<div class="hint" style="margin:2px 0 0;">'+todas.length+' refs'+(sinUb?' · '+sinUb+' sin ubicación':'')+(sinAux?' · '+sinAux+' sin auxiliar':'')+'</div></div>'+
     '<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">'+
@@ -1128,6 +1196,8 @@ function renderMatriz(){
 
   var fila = function(id){ return (state._matriz.filas||[]).filter(function(f){ return f.id===id; })[0]; };
   var cs = root.querySelector("#mzCo"); if(cs) cs.onchange = function(e){ state._matrizCo = e.target.value; state._matriz = null; state._mzLim = 100; state._mzChip = ""; render(); };
+  var bv = root.querySelector("#mzVolver");
+  if(bv) bv.onclick = function(){ var id = state._volverCarga; state._volverCarga = null; state.adminTab = "cargas"; state._tab = "asignar"; openCarga(id); };
   root.querySelector("#mzAgregar").onclick = function(){ state._mzAdd = !state._mzAdd; render(); };
   root.querySelector("#mzActualizar").onclick = function(){ state._matriz = null; render(); };
   root.querySelector("#mzQ").oninput = debounce(function(e){ state._mzQ = e.target.value; state._mzLim = 100; state._mzFocus = true; render(); }, 200);
@@ -1397,11 +1467,12 @@ function renderAdminPanel(){
     '<p class="hint" style="margin-top:8px;">Los coordinadores/supervisores cargan y asignan en su ciudad; los auxiliares ejecutan el conteo; el administrador ve todas las ciudades.</p>'+
   '</div>';
 
+/* claves por usuario: solo si hay servidor que las verifique (Supabase) */  var conClaves = Store.tieneClaves();  if(conClaves && !state._conClave && !state._conClaveCargando){    state._conClaveCargando = true;    Store.usuariosConClave().then(function(l){ state._conClave = l; }).catch(function(){ state._conClave = []; }).then(function(){ state._conClaveCargando = false; if(state.identity && state.identity.rol==='administrador' && state.adminTab==='usuarios' && state.view!=='detail') render(); });  }  function tieneClaveU(u){ return (state._conClave||[]).indexOf(String(u.id).toLowerCase())>-1; }
   html += '<div class="card" style="padding:0;"><div class="tablewrap"><table><thead><tr>'+
-    '<th>Nombre</th><th>Ciudad</th><th>Cargo</th><th>Rol</th><th>Estado</th><th></th>'+
+    '<th>Nombre</th><th>Ciudad</th><th>Cargo</th><th>Rol</th><th>Estado</th>'+(conClaves?'<th>Clave</th>':'')+'<th></th>'+
   '</tr></thead><tbody>';
   if(!usuarios.length){
-    html += '<tr><td colspan="6" style="text-align:center;color:var(--muted);padding:24px;">Aún no hay usuarios registrados.</td></tr>';
+    html += '<tr><td colspan="7" style="text-align:center;color:var(--muted);padding:24px;">Aún no hay usuarios registrados.</td></tr>';
   }
   usuarios.forEach(function(u){
     var activo = u.activo!==false;
@@ -1411,6 +1482,7 @@ function renderAdminPanel(){
       '<td>'+esc(u.cargo||"—")+'</td>'+
       '<td>'+esc(ROL_LABEL[u.rol]||u.rol)+'</td>'+
       '<td>'+(activo?'<span class="pill green dot">Activo</span>':'<span class="pill neutral dot">Inactivo</span>')+'</td>'+
+      (conClaves ? '<td>'+(u.rol==='administrador'?'<span class="hint">Usuario y clave propios</span>':tieneClaveU(u)?'<span class="pill green dot">Creada</span> <button class="btn sm" data-reset="'+esc(u.id)+'">Restablecer</button>':'<span class="pill neutral dot">Pendiente</span>')+'</td>' : '')+
       '<td style="white-space:nowrap;">'+
         '<button class="btn sm" data-edit="'+esc(u.id)+'">Editar</button> '+
         '<button class="btn sm" data-toggle="'+esc(u.id)+'" data-activo="'+activo+'">'+(activo?"Desactivar":"Activar")+'</button> '+
@@ -1438,6 +1510,20 @@ function renderAdminPanel(){
     }catch(err){ await notify("No se pudo guardar el usuario: "+(err&&err.message?err.message:err)); }
   };
   if(editing){ root.querySelector("#admCancelar").onclick = function(){ state._admEditing = null; render(); }; }
+  root.querySelectorAll("[data-reset]").forEach(function(b){
+    b.onclick = async function(){
+      var id = b.getAttribute("data-reset");
+      var clave = await askPassword("Para restablecer la clave de "+nombreDe(id)+", escribe tu clave de administrador:");
+      if(clave===null) return;
+      try{
+        if(await Store.restablecerClave(id, clave)){
+          state._conClave = null;
+          await notify("Clave de "+nombreDe(id)+" restablecida. Al ingresar, creará una nueva.");
+          render();
+        } else { await notify("No se pudo restablecer: tu clave de administrador es incorrecta o este usuario no se puede restablecer."); }
+      }catch(err){ await notify("No se pudo restablecer: "+(err&&err.message?err.message:err)); }
+    };
+  });
   root.querySelectorAll("[data-edit]").forEach(function(b){ b.onclick = function(){ state._admEditing = b.getAttribute("data-edit"); render(); }; });
   root.querySelectorAll("[data-toggle]").forEach(function(b){
     b.onclick = async function(){
@@ -1540,7 +1626,7 @@ function showUploadModal(){
     (esAdmin
       ? '<div class="field"><label>Ciudad de la carga</label><select id="upCiudad">'+CIUDADES.map(function(c){ return '<option value="'+esc(c.nombre)+'"'+(state._filtroCiudad===c.nombre?" selected":"")+'>'+esc(c.nombre)+' · C.O. '+c.co+'</option>'; }).join("")+'</select></div>'
       : '<p class="hint" style="margin-bottom:8px;">La carga quedará en <b>'+esc(idn.ciudad)+'</b>. Solo los usuarios de esa ciudad (y el administrador) la verán.</p>')+
-    '<p class="hint" style="margin-bottom:12px;">Selecciona el Excel exportado de SIESA (opción "cantidades en unidades de empaque"). Se leen las columnas: Bodega, Desc. bodega, Referencia, Desc. item, U.M., Factor U.M., Existencia, GRUPO SHOPPER, LINEA PROVEEDOR, MARCA, Código barra principal, Costo prom. unit./tot., Calidad Perecedero. Opcionales: <b>"Asignar a"</b> (nombre del auxiliar, se precarga si coincide con un usuario de la ciudad) y <b>"Ubicación"</b> (número de posición para el recorrido guiado). También puedes importar la asignación después, dentro de la carga.</p>'+
+    '<p class="hint" style="margin-bottom:12px;">Selecciona el Excel exportado de SIESA (con la <b>Existencia en unidades enteras</b>, no en cajas, y el costo promedio por unidad). Se leen las columnas: Bodega, Desc. bodega, Referencia, Desc. item, U.M., Factor U.M., Existencia, GRUPO SHOPPER, LINEA PROVEEDOR, MARCA, Código barra principal, Costo prom. unit./tot., Calidad Perecedero. Opcionales: <b>"Asignar a"</b> (nombre del auxiliar, se precarga si coincide con un usuario de la ciudad) y <b>"Ubicación"</b> (número de posición para el recorrido guiado). También puedes importar la asignación después, dentro de la carga.</p>'+
     '<div class="field"><input type="file" id="fileInput" accept=".xlsx,.xls"></div>'+
     '<div class="field" id="fileStatus" style="font-size:13px;color:var(--muted);"></div>'+
     '<button class="btn primary block" id="mConfirm" disabled>Crear carga</button>'+
@@ -1568,7 +1654,7 @@ function showUploadModal(){
             barcode: String(r["Código barra principal"]||"").trim(),
             um: String(r["U.M."]||"").trim(),
             factorUM: Number(r["Factor U.M."])||1,
-            existenciaUM: Number(r["Existencia"])||0,
+            existenciaUM: Math.round(Number(r["Existencia"])||0),
             grupoShopper: String(r["GRUPO SHOPPER"]||"").trim(),
             lineaProveedor: String(r["LINEA PROVEEDOR"]||"").trim(),
             marca: String(r["MARCA"]||"").trim(),
@@ -1631,7 +1717,7 @@ function showUploadModal(){
 
 function openCarga(id){
   if(state.unsubItems) state.unsubItems();
-  state.tareas = [];
+  state.tareas = []; state._asigEstado = ""; state._asigAux = ""; state._asigQ = "";
   setState({currentCargaId:id, view:"detail", unsubItems:suscribirCarga(id), selectedIds:{}});
 }
 
@@ -1753,6 +1839,18 @@ function askPickUsers(titulo, lista){
   });
 }
 
+function itemsAsignacionVisibles(items){
+  var fe = state._asigEstado||"", fa = state._asigAux||"", q = (state._asigQ||"").trim().toLowerCase();
+  return items.filter(function(it){
+    if(fe==="sinasignar" && it.asignadoA) return false;
+    if(fe && fe!=="sinasignar" && (it.estado||"pendiente")!==fe) return false;
+    if(fa==="__sin__" && it.asignadoA) return false;
+    if(fa && fa!=="__sin__" && it.asignadoA!==fa) return false;
+    if(q && (String(it.referencia)+" "+(it.descItem||"")).toLowerCase().indexOf(q)<0) return false;
+    return true;
+  });
+}
+
 function renderAsignarTab(items, operarios){
   var aux = auxiliaresDeLaCarga(), carga = cargaActual();
   var esAdmin = state.identity.rol==="administrador", sinCiudad = !carga.ciudad;
@@ -1797,11 +1895,25 @@ function renderAsignarTab(items, operarios){
       }).join("")+'</tbody></table></div></div>';
   }
 
+  /* filtros: estado, auxiliar y búsqueda */
+  var cnt = {todas:items.length, sinasignar:0, pendiente:0, en_progreso:0, finalizado:0};
+  items.forEach(function(it){ if(!it.asignadoA) cnt.sinasignar++; var e = it.estado||"pendiente"; cnt[e] = (cnt[e]||0)+1; });
+  var fe = state._asigEstado||"", vis = itemsAsignacionVisibles(items);
+  var auxEnCarga = Array.from(new Set(items.filter(function(it){ return it.asignadoA; }).map(function(it){ return it.asignadoA; })))
+    .sort(function(a,b){ return String(nombreDe(a)).localeCompare(String(nombreDe(b))); });
+  html += '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px;">'+
+    [["","Todas",cnt.todas],["sinasignar","Sin asignar",cnt.sinasignar],["pendiente","Pendiente",cnt.pendiente],["en_progreso","En progreso",cnt.en_progreso],["finalizado","Finalizado",cnt.finalizado]]
+      .map(function(c){ return '<button type="button" class="chipf'+(fe===c[0]?" on":"")+'" data-festado="'+c[0]+'">'+c[1]+' '+c[2]+'</button>'; }).join("")+'</div>'+
+    '<div class="ix-bar"><select id="asigAux" class="grow" aria-label="Auxiliar"><option value="">Todos los auxiliares</option><option value="__sin__"'+(state._asigAux==="__sin__"?" selected":"")+'>Sin asignar</option>'+
+      auxEnCarga.map(function(id){ return '<option value="'+esc(id)+'"'+(state._asigAux===id?" selected":"")+'>'+esc(nombreDe(id))+'</option>'; }).join("")+'</select>'+
+    '<input type="search" id="asigQ" class="grow" placeholder="Buscar referencia o descripción" value="'+esc(state._asigQ||"")+'">'+
+    '<span class="hint" style="margin:0;">'+vis.length+' de '+items.length+' referencias</span></div>';
+
   html += '<div class="card" style="padding:0;">'+
     '<div class="tablewrap"><table><thead><tr>'+
       '<th></th><th>Referencia</th><th>Ubic.</th><th>Descripción</th><th>Grupo Shopper</th><th>Asignado a</th><th>Estado</th><th>Lotes</th>'+
     '</tr></thead><tbody>';
-  items.forEach(function(it){
+  vis.forEach(function(it){
     var estPill = it.estado==="finalizado" ? '<span class="pill green dot">Finalizado</span>' : it.estado==="en_progreso" ? '<span class="pill amber dot">En progreso</span>' : '<span class="pill neutral dot">Pendiente</span>';
     html += '<tr>'+
       '<td><input type="checkbox" class="rowchk" data-id="'+esc(it.id)+'" '+(state.selectedIds[it.id]?"checked":"")+'></td>'+
@@ -1892,6 +2004,7 @@ function wireAsignarTab(){
   root.querySelector("#btnVerMatriz").onclick = function(){
     var c = cargaActual(), co = c.co || ((ciudadPorNombre(c.ciudad)||{}).co);
     if(state.identity.rol==="administrador" && co) state._matrizCo = co;
+    state._volverCarga = state.currentCargaId;
     state._matriz = null; state._mzChip = ""; state.adminTab = "matriz";
     if(state.unsubItems) state.unsubItems();
     setState({view:"list", currentCargaId:null, items:[], tareas:[], unsubItems:null});
@@ -1900,10 +2013,18 @@ function wireAsignarTab(){
     c.onchange = function(){ state.selectedIds[c.getAttribute("data-id")] = c.checked; };
   });
   root.querySelector("#btnSelAll").onclick = function(){
-    var todas = state.items.every(function(it){ return state.selectedIds[it.id]; });
-    state.items.forEach(function(it){ state.selectedIds[it.id] = !todas; });
+    var vis = itemsAsignacionVisibles(state.items);
+    var todas = vis.length && vis.every(function(it){ return state.selectedIds[it.id]; });
+    vis.forEach(function(it){ state.selectedIds[it.id] = !todas; });
     render();
   };
+  root.querySelectorAll("[data-festado]").forEach(function(b){ b.onclick = function(){ state._asigEstado = b.getAttribute("data-festado"); render(); }; });
+  var aa = root.querySelector("#asigAux"); if(aa) aa.onchange = function(e){ state._asigAux = e.target.value; render(); };
+  var aq = root.querySelector("#asigQ");
+  if(aq){
+    aq.oninput = debounce(function(e){ state._asigQ = e.target.value; state._asigFocus = true; render(); }, 200);
+    if(state._asigFocus){ state._asigFocus = false; aq.focus(); try{ aq.setSelectionRange(aq.value.length, aq.value.length); }catch(e){} }
+  }
   root.querySelector("#btnAssign").onclick = async function(){
     var ids = Object.keys(state.selectedIds).filter(function(k){return state.selectedIds[k];});
     var op = state.operarioInput;
@@ -1930,12 +2051,12 @@ function wireAsignarTab(){
 }
 
 function renderCruceTab(items){
-  var html = '<div class="banner">Cruce automático: existencia de sistema (convertida de unidades de empaque a unidades con el Factor U.M.) vs. suma de cantidades físicas registradas por el operario. RN-07 / RF-13.</div>';
+  var html = '<div class="banner">Cruce automático: existencia de sistema (en unidades) vs. suma de las cantidades físicas (en unidades) registradas por el auxiliar. RN-07 / RF-13.</div>';
   html += '<div class="card" style="padding:0;"><div class="tablewrap"><table><thead><tr>'+
-    '<th>Referencia</th><th>Descripción</th><th>U.M. / Factor</th><th>Existencia sistema (und)</th><th>Físico contado (und)</th><th>Diferencia</th><th>Semáforo</th>'+
+    '<th>Referencia</th><th>Descripción</th><th>U.M.</th><th>Existencia sistema (und)</th><th>Físico contado (und)</th><th>Diferencia</th><th>Semáforo</th>'+
   '</tr></thead><tbody>';
   items.forEach(function(it){
-    var sisUnid = (it.existenciaUM||0) * (it.factorUM||1);
+    var sisUnid = Math.round(it.existenciaUM||0);
     var fisico = (it.registros||[]).reduce(function(s,r){ return s + (Number(r.cantidad)||0); }, 0);
     var diff = fisico - sisUnid;
     var pct = sisUnid ? Math.abs(diff)/sisUnid : (fisico?1:0);
@@ -1943,10 +2064,10 @@ function renderCruceTab(items){
     html += '<tr>'+
       '<td class="mono">'+esc(it.referencia)+'</td>'+
       '<td>'+esc(it.descItem)+'</td>'+
-      '<td class="mono">'+esc(it.um)+' / ×'+it.factorUM+'</td>'+
-      '<td class="num">'+fmtNum(sisUnid,1)+'</td>'+
-      '<td class="num">'+((it.registros&&it.registros.length)?fmtNum(fisico,1):"—")+'</td>'+
-      '<td class="num">'+((it.registros&&it.registros.length)?(diff>=0?"+":"")+fmtNum(diff,1):"—")+'</td>'+
+      '<td class="mono">'+esc(it.um)+'</td>'+
+      '<td class="num">'+fmtNum(sisUnid,0)+'</td>'+
+      '<td class="num">'+((it.registros&&it.registros.length)?fmtNum(fisico,0):"—")+'</td>'+
+      '<td class="num">'+((it.registros&&it.registros.length)?(diff>=0?"+":"")+fmtNum(diff,0):"—")+'</td>'+
       '<td><span class="pill '+estado.cls+' dot">'+estado.txt+'</span></td>'+
     '</tr>';
   });
@@ -1963,7 +2084,7 @@ function fmtPct(x){ return x.toLocaleString("es-CO",{maximumFractionDigits:1}); 
 function ixLotes(items, ref){
   var out = [];
   items.forEach(function(it){
-    var cu = (it.costoUnit||0)/(it.factorUM||1); /* SIESA entrega el costo por empaque (caja): se lleva a costo por unidad */
+    var cu = it.costoUnit||0; /* el archivo viene en unidades: costo promedio por unidad */
     (it.registros||[]).forEach(function(r){
       var cant = Number(r.cantidad)||0, d = diasEntre(r.fechaVenc, ref);
       out.push({cod:it.referencia, desc:it.descItem||"", linea:it.lineaProveedor||"Sin línea", ciudad:it._ciudad||"", bodega:it.bodega||"", bdesc:it.bodegaDesc||"", cant:cant, fecha:r.fechaVenc, dias:d, banda:bandaDe(d), costo:cant*cu});
@@ -2161,7 +2282,7 @@ function renderIndicadoresTab(items, opts){
     (lista.length>S.lim ? '<button class="btn sm" id="ixDetMore" type="button" style="align-self:flex-start;">Mostrar '+Math.min(60,lista.length-S.lim)+' más ('+fmtNum(lista.length-S.lim,0)+' restantes)</button>' : '')+
   '</section>';
 
-  html += '<p class="footer-note" style="text-align:left;">Costo por unidad = costo promedio de SIESA ÷ Factor U.M. (SIESA lo entrega por empaque/caja). Las unidades y fechas son las registradas por los operarios en el conteo físico.</p>';
+  html += '<p class="footer-note" style="text-align:left;">Cantidades en unidades enteras y costo promedio por unidad, tal como vienen del archivo. Las unidades y fechas son las registradas por los auxiliares en el conteo físico.</p>';
   return html;
 }
 
@@ -2202,7 +2323,7 @@ function wireIndicadoresTab(){
 function filasLotes(items, carga, ref){
   var out = [];
   items.forEach(function(it){
-    var cu = (it.costoUnit||0)/(it.factorUM||1);
+    var cu = it.costoUnit||0;
     (it.registros||[]).forEach(function(r){
       var d = diasEntre(r.fechaVenc, ref), cant = Number(r.cantidad)||0;
       out.push({
@@ -2217,14 +2338,14 @@ function filasLotes(items, carga, ref){
 }
 function filasCruce(items, carga){
   return items.map(function(it){
-    var sis = (it.existenciaUM||0)*(it.factorUM||1);
+    var sis = Math.round(it.existenciaUM||0);
     var fis = (it.registros||[]).reduce(function(s,r){ return s+(Number(r.cantidad)||0); }, 0);
     var contado = it.registros && it.registros.length;
     var pct = sis ? Math.abs(fis-sis)/sis : (fis?1:0);
     return {
       "Ciudad":(carga&&carga.ciudad)||it._ciudad||"", "Bodega":it.bodega||(carga&&carga.bodega)||"", "Código":it.referencia, "Descripción":it.descItem,
-      "Empaque":it.um||"", "Factor":it.factorUM||1, "Existencia sistema (und)":Math.round(sis*100)/100,
-      "Físico contado (und)":contado?fis:"", "Diferencia":contado?Math.round((fis-sis)*100)/100:"",
+      "U.M.":it.um||"", "Existencia sistema (und)":sis,
+      "Físico contado (und)":contado?fis:"", "Diferencia":contado?(fis-sis):"",
       "Estado":!contado?"Sin contar":pct<=0.02?"Cuadra":pct<=0.10?"Diferencia leve":"Diferencia alta",
       "Asignado a":nombreDe(it.asignadoA)
     };
@@ -2604,7 +2725,7 @@ function renderOperarioEntry(){
 
   html += '<div class="card" style="margin-bottom:14px;">'+
     '<h3 style="font-size:15px;margin-bottom:12px;">Registrar lote</h3>'+
-    '<div class="field"><label>Cantidad (unidades)</label><input id="cantInput" type="number" min="0" step="0.01" placeholder="Ej: 12" value="'+esc(state._entryCantidad)+'"></div>'+
+    '<div class="field"><label>Cantidad en unidades (número entero)</label><input id="cantInput" type="number" min="1" step="1" inputmode="numeric" pattern="[0-9]*" placeholder="Ej: 12" value="'+esc(state._entryCantidad)+'"></div>'+
     '<div class="field"><label>Fecha de vencimiento</label><input id="fechaInput" type="date" value="'+esc(state._entryFecha)+'"><div class="hint">Si el producto ya está vencido físicamente, elige su fecha real aunque sea anterior a hoy.</div></div>'+
     '<button class="btn primary block" id="btnSaveLote">Guardar lote</button>'+
   '</div>';
@@ -2616,7 +2737,7 @@ function renderOperarioEntry(){
     html += '<div class="hint">Aún no hay lotes registrados para esta referencia.</div>';
   } else {
     regs.forEach(function(r, idx){
-      html += '<div class="lote-row"><span>'+fmtNum(r.cantidad,2)+' und · vence '+esc(r.fechaVenc)+'</span><button class="x" data-idx="'+idx+'">✕</button></div>';
+      html += '<div class="lote-row"><span>'+fmtNum(r.cantidad,0)+' und · vence '+esc(r.fechaVenc)+'</span><button class="x" data-idx="'+idx+'">✕</button></div>';
     });
   }
   html += '<button class="btn block" id="btnDone" style="margin-top:12px;" '+(regs.length?"":"disabled")+'>Marcar referencia como contada ✓</button>';
@@ -2630,9 +2751,9 @@ function renderOperarioEntry(){
   root.querySelector("#cantInput").oninput = function(e){ state._entryCantidad = e.target.value; };
   root.querySelector("#fechaInput").oninput = function(e){ state._entryFecha = e.target.value; };
   root.querySelector("#btnSaveLote").onclick = async function(){
-    var cant = parseFloat(state._entryCantidad);
+    var cant = Number(String(state._entryCantidad).trim());
     var fecha = state._entryFecha;
-    if(!cant || cant<=0){ await notify("Ingresa una cantidad válida."); return; }
+    if(!cant || cant<=0 || !Number.isInteger(cant)){ await notify("Ingresa la cantidad en unidades, como número entero (sin decimales)."); return; }
     if(!fecha){ await notify("Elige una fecha de vencimiento."); return; }
     if(fecha < todayISO() && !(await askConfirm("La fecha "+fecha+" ya pasó. ¿Confirmas que este producto está físicamente vencido?"))){ return; }
     await Store.addRegistro(state.currentCargaId, it.id, {
