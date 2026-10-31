@@ -1165,6 +1165,7 @@ function renderMatriz(){
       '<button class="btn sm" id="mzActualizar">⟳ Actualizar</button>'+
       '<button class="btn sm" id="mzImport">⇪ Subir Excel</button>'+
       '<button class="btn sm" id="mzExport"'+(todas.length?"":" disabled")+'>⇩ Exportar</button>'+
+      '<button class="btn sm danger" id="mzBorrar"'+(todas.length?"":" disabled")+'>🗑 Borrar matriz</button>'+
     '</div></div>';
 
   if(state._mzAdd){
@@ -1220,6 +1221,15 @@ function renderMatriz(){
     })}], "Matriz asignacion "+ciudad.nombre+" "+todayISO()+".xlsx");
   };
   root.querySelector("#mzImport").onclick = function(){ showImportMatriz(ciudad); };
+  root.querySelector("#mzBorrar").onclick = async function(){
+    if(!todas.length) return;
+    if(!(await askConfirm('¿Borrar toda la matriz de '+ciudad.nombre+' ('+todas.length+' referencias)? Se pierden los auxiliares y ubicaciones guardados en la matriz. Las cargas ya creadas conservan sus asignaciones. Si la necesitas después, usa antes "Exportar". Esta acción no se puede deshacer.'))) return;
+    try{
+      await Store.limpiarMatriz(co);
+      state._matriz = {co:co, filas:[]}; state._mzChip = ""; state._mzQ = ""; state._mzLim = 100;
+      await notify('La matriz de '+ciudad.nombre+' quedó vacía.'); render();
+    }catch(err){ await notify("No se pudo borrar la matriz: "+(err&&err.message?err.message:err)); }
+  };
   var add = root.querySelector("#mzAdd");
   if(add) add.onclick = async function(){
     var ref = root.querySelector("#mzRef").value.trim();
