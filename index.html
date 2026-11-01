@@ -144,6 +144,8 @@ input:focus-visible, button:focus-visible, select:focus-visible{ outline:2px sol
   background:var(--bg); color:var(--ink);
 }
 .hint{ font-size:12.5px; color:var(--muted); margin-top:4px; }
+.fecha-sel{ display:grid; grid-template-columns:.8fr 1.5fr 1fr; gap:8px; }
+.fecha-sel select{ width:100%; min-height:48px; padding:10px 8px; border:1.5px solid var(--border); border-radius:var(--radius-md); background:var(--bg); color:var(--ink); font-size:16px; }
 
 .pill{ display:inline-flex; align-items:center; gap:5px; padding:3px 10px; border-radius:999px; font-size:11.5px; font-weight:700; font-family:"IBM Plex Mono",monospace; white-space:nowrap; }
 .pill.green{ background:var(--green-bg); color:var(--green); }
@@ -2785,8 +2787,31 @@ function openEntry(itemId, manualConfirm, scannedCode){
   state._entryManualConfirm = manualConfirm || false;
   state._entryScannedCode = scannedCode || null;
   state._entryCantidad = "";
-  state._entryFecha = todayISO();
+  state._entryFecha = ""; state._eD = ""; state._eM = ""; state._eY = "";
   setState({view:"entry"});
+}
+
+/* Fecha de vencimiento en tres listas (día, mes, año): más rápido y claro en el celular que el calendario. */
+var MESES_ES = ["Enero","Febrero","Marzo","Abril","Mayo","Junio","Julio","Agosto","Septiembre","Octubre","Noviembre","Diciembre"];
+function selectsFecha(){
+  var anio = new Date().getFullYear(), anios = [], i;
+  for(i=0;i<=10;i++) anios.push(anio+i);
+  anios.push(anio-1);
+  function opts(lista, sel, vacio){ return '<option value="">'+vacio+'</option>'+lista.map(function(o){ return '<option value="'+o.v+'"'+(String(sel)===String(o.v)?" selected":"")+'>'+o.t+'</option>'; }).join(""); }
+  var dias = [], meses = MESES_ES.map(function(n, k){ return {v:k+1, t:n}; });
+  for(i=1;i<=31;i++) dias.push({v:i, t:("0"+i).slice(-2)});
+  return '<div class="fecha-sel">'+
+    '<select id="fDia" aria-label="Día">'+opts(dias, state._eD, "Día")+'</select>'+
+    '<select id="fMes" aria-label="Mes">'+opts(meses, state._eM, "Mes")+'</select>'+
+    '<select id="fAnio" aria-label="Año">'+opts(anios.map(function(a){ return {v:a, t:a}; }), state._eY, "Año")+'</select></div>';
+}
+/* Devuelve "AAAA-MM-DD" si el día, mes y año elegidos forman una fecha real; si no, "". */
+function fechaDeSelects(){
+  var d = parseInt(state._eD,10), m = parseInt(state._eM,10), y = parseInt(state._eY,10);
+  if(!d || !m || !y) return "";
+  var f = new Date(y, m-1, d);
+  if(f.getFullYear()!==y || f.getMonth()!==m-1 || f.getDate()!==d) return "";
+  return y+"-"+("0"+m).slice(-2)+"-"+("0"+d).slice(-2);
 }
 
 function renderOperarioEntry(){
@@ -2812,7 +2837,7 @@ function renderOperarioEntry(){
   html += '<div class="card" style="margin-bottom:14px;">'+
     '<h3 style="font-size:15px;margin-bottom:12px;">Registrar lote</h3>'+
     '<div class="field"><label>Cantidad en unidades (número entero)</label><input id="cantInput" type="number" min="1" step="1" inputmode="numeric" pattern="[0-9]*" placeholder="Ej: 12" value="'+esc(state._entryCantidad)+'"></div>'+
-    '<div class="field"><label>Fecha de vencimiento</label><input id="fechaInput" type="date" value="'+esc(state._entryFecha)+'"><div class="hint">Si el producto ya está vencido físicamente, elige su fecha real aunque sea anterior a hoy.</div></div>'+
+    '<div class="field"><label>Fecha de vencimiento</label>'+selectsFecha()+'<div class="hint">Si el producto ya está vencido físicamente, elige su fecha real aunque sea anterior a hoy (el año anterior está al final de la lista).</div></div>'+
     '<button class="btn primary block" id="btnSaveLote">Guardar lote</button>'+
   '</div>';
 
@@ -2835,18 +2860,21 @@ function renderOperarioEntry(){
 
   root.querySelector("#backBtn").onclick = function(){ setState({view:"mine"}); };
   root.querySelector("#cantInput").oninput = function(e){ state._entryCantidad = e.target.value; };
-  root.querySelector("#fechaInput").oninput = function(e){ state._entryFecha = e.target.value; };
+  [["#fDia","_eD"],["#fMes","_eM"],["#fAnio","_eY"]].forEach(function(p){
+    root.querySelector(p[0]).onchange = function(e){ state[p[1]] = e.target.value; state._entryFecha = fechaDeSelects(); };
+  });
   root.querySelector("#btnSaveLote").onclick = async function(){
     var cant = Number(String(state._entryCantidad).trim());
-    var fecha = state._entryFecha;
+    var fecha = fechaDeSelects();
     if(!cant || cant<=0 || !Number.isInteger(cant)){ await notify("Ingresa la cantidad en unidades, como número entero (sin decimales)."); return; }
-    if(!fecha){ await notify("Elige una fecha de vencimiento."); return; }
+    if(!fecha){ await notify(state._eD && state._eM && state._eY ? "Esa fecha no existe: revisa el día y el mes." : "Elige el día, el mes y el año de vencimiento."); return; }
     if(fecha < todayISO() && !(await askConfirm("La fecha "+fecha+" ya pasó. ¿Confirmas que este producto está físicamente vencido?"))){ return; }
     await Store.addRegistro(state.currentCargaId, it.id, {
       cantidad:cant, fechaVenc:fecha, capturadoPor:state.identity.id, capturadoEn:new Date().toISOString(),
       confirmadoManual: state._entryManualConfirm, codigoEscaneado: state._entryScannedCode
     });
     state._entryCantidad = ""; state._entryManualConfirm = false; state._entryScannedCode = null;
+    state._entryFecha = ""; state._eD = ""; state._eM = ""; state._eY = "";
     render();
   };
   root.querySelectorAll(".lote-row .x").forEach(function(b){
