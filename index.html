@@ -2744,7 +2744,7 @@ function showElegirBodegaModal(lista){
     lista.map(function(it){
       var n = (it.registros||[]).length;
       return '<div class="item-row" data-id="'+esc(it.id)+'"><div class="ico" style="font-weight:700;">'+esc(it.bodega||"·")+'</div><div class="info"><div class="t">'+esc(bodegaTxt(it)||"Sin bodega")+'</div>'+
-        '<div class="m">'+(it.estado==="finalizado"?"Contada":n?n+" lote(s) registrado(s)":"Pendiente")+'</div></div></div>';
+        '<div class="m">'+(it.estado==="finalizado"?"Contada":n?n+" conteo(s) registrado(s)":"Pendiente")+'</div></div></div>';
     }).join("")+
     '<button class="btn block" id="ebVolver" type="button" style="margin-top:12px;">← Volver</button></div>';
   document.body.appendChild(m);
@@ -2835,17 +2835,17 @@ function renderOperarioEntry(){
   '</div>';
 
   html += '<div class="card" style="margin-bottom:14px;">'+
-    '<h3 style="font-size:15px;margin-bottom:12px;">Registrar lote</h3>'+
+    '<h3 style="font-size:15px;margin-bottom:12px;">Registrar conteo</h3>'+
     '<div class="field"><label>Cantidad en unidades (número entero)</label><input id="cantInput" type="number" min="1" step="1" inputmode="numeric" pattern="[0-9]*" placeholder="Ej: 12" value="'+esc(state._entryCantidad)+'"></div>'+
     '<div class="field"><label>Fecha de vencimiento</label>'+selectsFecha()+'<div class="hint">Si el producto ya está vencido físicamente, elige su fecha real aunque sea anterior a hoy (el año anterior está al final de la lista).</div></div>'+
-    '<button class="btn primary block" id="btnSaveLote">Guardar lote</button>'+
+    '<button class="btn primary block" id="btnSaveLote">Guardar conteo</button>'+
   '</div>';
 
   var regs = it.registros || [];
   html += '<div class="card">'+
-    '<h3 style="font-size:15px;margin-bottom:10px;">Lotes registrados ('+regs.length+')</h3>';
+    '<h3 style="font-size:15px;margin-bottom:10px;">Conteos registrados ('+regs.length+')</h3>';
   if(!regs.length){
-    html += '<div class="hint">Aún no hay lotes registrados para esta referencia.</div>';
+    html += '<div class="hint">Aún no hay conteos registrados para esta referencia.</div>';
   } else {
     regs.forEach(function(r, idx){
       html += '<div class="lote-row"><span>'+fmtNum(r.cantidad,0)+' und · vence '+esc(r.fechaVenc)+'</span><button class="x" data-idx="'+idx+'">✕</button></div>';
