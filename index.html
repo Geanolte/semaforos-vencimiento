@@ -2868,17 +2868,32 @@ function renderOperarioEntry(){
     var fecha = fechaDeSelects();
     if(!cant || cant<=0 || !Number.isInteger(cant)){ await notify("Ingresa la cantidad en unidades, como número entero (sin decimales)."); return; }
     if(!fecha){ await notify(state._eD && state._eM && state._eY ? "Esa fecha no existe: revisa el día y el mes." : "Elige el día, el mes y el año de vencimiento."); return; }
-    if(fecha < todayISO() && !(await askConfirm("La fecha "+fecha+" ya pasó. ¿Confirmas que este producto está físicamente vencido?"))){ return; }
-    await Store.addRegistro(state.currentCargaId, it.id, {
-      cantidad:cant, fechaVenc:fecha, capturadoPor:state.identity.id, capturadoEn:new Date().toISOString(),
-      confirmadoManual: state._entryManualConfirm, codigoEscaneado: state._entryScannedCode
-    });
-    state._entryCantidad = ""; state._entryManualConfirm = false; state._entryScannedCode = null;
-    state._entryFecha = ""; state._eD = ""; state._eM = ""; state._eY = "";
-    render();
+    if(state._guardandoConteo) return;
+    state._guardandoConteo = true;
+    var btn = root.querySelector("#btnSaveLote"); if(btn) btn.disabled = true;
+    try{
+      if(fecha < todayISO() && !(await askConfirm("La fecha "+fecha+" ya pasó. ¿Confirmas que este producto está físicamente vencido?"))){ return; }
+      var repetido = (it.registros||[]).some(function(r){ return Number(r.cantidad)===cant && r.fechaVenc===fecha; });
+      if(repetido && !(await askConfirm("Ya registraste "+fmtNum(cant,0)+" und con vencimiento "+fecha+" en esta referencia. ¿Es otro conteo distinto (por ejemplo otra estiba)? Si fue un doble toque, elige Cancelar."))){ return; }
+      await Store.addRegistro(state.currentCargaId, it.id, {
+        cantidad:cant, fechaVenc:fecha, capturadoPor:state.identity.id, capturadoEn:new Date().toISOString(),
+        confirmadoManual: state._entryManualConfirm, codigoEscaneado: state._entryScannedCode
+      });
+      state._entryCantidad = ""; state._entryManualConfirm = false; state._entryScannedCode = null;
+      state._entryFecha = ""; state._eD = ""; state._eM = ""; state._eY = "";
+      render();
+    } finally {
+      state._guardandoConteo = false;
+      var b2 = root.querySelector("#btnSaveLote"); if(b2) b2.disabled = false;
+    }
   };
   root.querySelectorAll(".lote-row .x").forEach(function(b){
-    b.onclick = async function(){ await Store.removeRegistro(state.currentCargaId, it.id, parseInt(b.getAttribute("data-idx"),10)); render(); };
+    b.onclick = async function(){
+      if(state._borrandoConteo) return;
+      state._borrandoConteo = true;
+      try{ await Store.removeRegistro(state.currentCargaId, it.id, parseInt(b.getAttribute("data-idx"),10)); render(); }
+      finally{ state._borrandoConteo = false; }
+    };
   });
   var doneBtn = root.querySelector("#btnDone");
   if(doneBtn) doneBtn.onclick = async function(){ await Store.finalizarItem(state.currentCargaId, it.id); setState({view:"mine"}); };
