@@ -351,6 +351,90 @@ function bodegasDe(items){
   items.forEach(function(x){ var c = String(x.bodega||"").trim(); if(c && !por[c]) por[c] = {cod:c, desc:String(x.bodegaDesc||"").trim()}; });
   return Object.keys(por).sort().map(function(k){ return por[k]; });
 }
+/* Solo entran al semáforo las bodegas de inventario del negocio, por el final del código:
+   x001 General, x004 No disponible, x005 Rentas y x006 Proveedores. Cualquier otra
+   (averías, destrucción, etc.) se omite al cargar el archivo. */
+var BODEGAS_PERMITIDAS = {"001":"General", "004":"No disponible", "005":"Rentas", "006":"Proveedores"};
+function bodegaPermitida(cod){ var c = String(cod||"").trim(); return /^\d{4,5}$/.test(c) && !!BODEGAS_PERMITIDAS[c.slice(-3)]; }
+
+/* @@PURAS-INICIO (funciones sin dependencias de pantalla; se prueban aparte) */
+function normRef(r){ return String(r==null?"":r).trim().replace(/^0+/,""); }
+function sumaArr(a){ return a.reduce(function(s,x){ return s+x; }, 0); }
+
+/* Producto físico en un solo lugar y en varias bodegas del sistema: el auxiliar cuenta UNA vez (lotes físicos) y
+   esta función los reparte entre las bodegas del grupo según la existencia que le queda disponible a cada una.
+   g = {ids:[idItem...], lead:idItem principal, ex:{idItem: existencia}}. Si lo contado supera la existencia
+   total, el sobrante queda en la bodega principal (se verá como diferencia en el cruce). */
+function repartirFisico(fisico, g){
+  var out = {}, asig = {};
+  g.ids.forEach(function(id){ out[id] = []; asig[id] = 0; });
+  (fisico||[]).forEach(function(l){
+    var q = Number(l.cantidad)||0; if(q<=0) return;
+    var caps = g.ids.map(function(id){ return Math.max(0, (g.ex[id]||0) - asig[id]); });
+    var tc = sumaArr(caps), share = {}, i;
+    g.ids.forEach(function(id){ share[id] = 0; });
+    if(tc>=q && tc>0){
+      var raws = caps.map(function(c){ return q*c/tc; }), fl = raws.map(Math.floor), left = q - sumaArr(fl);
+      var orden = raws.map(function(r,k){ return {k:k, resto:r-fl[k]}; }).sort(function(a,b){ return b.resto-a.resto; });
+      for(i=0;i<left;i++) fl[orden[i].k] += 1;
+      g.ids.forEach(function(id,k){ share[id] = fl[k]; });
+    } else {
+      g.ids.forEach(function(id,k){ share[id] = caps[k]; });
+      share[g.lead] += q - tc;
+    }
+    g.ids.forEach(function(id){
+      if(share[id]>0){ asig[id] += share[id]; out[id].push(Object.assign({}, l, {cantidad:share[id], cantidadFisica:q, repartido:true})); }
+    });
+  });
+  return out;
+}
+
+/* Interpreta el Excel de composición de ofertas: una fila por componente.
+   Devuelve {OFxxxx: {desc, comps:[{ref, desc, cant}]}}. */
+function parseComposicionOfertas(rows, colFn){
+  var comp = {};
+  rows.forEach(function(r){
+    var of = String(colFn(r, ["CODIGO OFERA","CODIGO OFERTA","OFERTA"])||"").trim().toUpperCase();
+    var ref = String(colFn(r, ["CODIGO PRODUCTO","COMPONENTE"])||"").trim();
+    var cant = Number(String(colFn(r, ["CANTIDAD OFERTA","CANT.","CANT","CANTIDAD"])||"").replace(",","."));
+    if(!of || !ref || !cant) return;
+    var o = comp[of] || (comp[of] = {desc:String(colFn(r, ["DESCRIPCION OFERTA"])||"").trim(), comps:[]});
+    o.comps.push({ref:ref, desc:String(colFn(r, ["DESCRIPCION PRODUCTO","DESCRIPCION COMPONENTE"])||"").trim(), cant:cant});
+  });
+  return comp;
+}
+
+/* Desglose de ofertas virtuales (OF): la existencia de cada oferta con composición se convierte en unidades de sus
+   componentes y se suma a la del componente en la misma bodega (o crea la fila del componente si no venía).
+   Las ofertas sin composición se dejan tal cual y se reportan. Devuelve {filas, desglosadas, sinComp, creados}. */
+function desglosarOfertas(filas, comp){
+  var out = [], idx = {}, aDesglosar = [], sinComp = {}, creados = [], nDes = 0;
+  filas.forEach(function(x){
+    var esOF = /^OF/i.test(String(x.referencia||""));
+    if(esOF && comp[String(x.referencia).toUpperCase()]){ aDesglosar.push(x); return; }
+    if(esOF) sinComp[x.referencia] = x.descItem;
+    out.push(x); idx[x.bodega+"|"+normRef(x.referencia)] = x;
+  });
+  aDesglosar.forEach(function(of){
+    nDes++;
+    comp[String(of.referencia).toUpperCase()].comps.forEach(function(k){
+      var add = Math.round((Number(of.existenciaUM)||0) * k.cant); if(add<=0) return;
+      var key = of.bodega+"|"+normRef(k.ref), t = idx[key];
+      if(!t){
+        t = {referencia:String(k.ref).trim(), descItem:k.desc||("Componente de "+of.referencia), barcode:"", um:"UND", factorUM:1, existenciaUM:0,
+             grupoShopper:of.grupoShopper, lineaProveedor:of.lineaProveedor, marca:of.marca, costoUnit:0, costoTotUM:0, perecedero:"si",
+             bodega:of.bodega, bodegaDesc:of.bodegaDesc, asignarTexto:of.asignarTexto||"", ubicacion:null, origenOferta:true, sinCosto:true};
+        out.push(t); idx[key] = t; creados.push(t.referencia+" "+t.descItem+" ("+of.bodega+")");
+      }
+      t.existenciaUM += add; t.existenciaVirtual = (t.existenciaVirtual||0) + add;
+      (t.deOfertas = t.deOfertas || []);
+      if(t.deOfertas.indexOf(of.referencia)<0) t.deOfertas.push(of.referencia);
+      if(t.costoUnit) t.costoTotUM = Math.round(t.costoUnit * t.existenciaUM * 100)/100;
+    });
+  });
+  return {filas:out, desglosadas:nDes, sinComp:sinComp, creados:creados};
+}
+/* @@PURAS-FIN */
 function bodegaTxt(it){ var c = String(it.bodega||"").trim(), d = String(it.bodegaDesc||"").trim(); return c ? c+(d?" · "+d:"") : ""; }
 function claveItem(it){ var b = String(it.bodega||"").trim(), r = String(it.referencia).trim(); return (b ? b+"-" : "")+r; }
 function ciudadPorBodega(bodega){ var p = String(bodega||"").slice(0,2); return CIUDADES.filter(function(c){ return c.bodegaPref===p; })[0] || null; }
@@ -628,14 +712,14 @@ var Store = {
     if(USE_DB){
       var snap = await dbNs.collection("cargas/"+cargaId+"/items").get();
       await inBatches(snap.docs, DB_BATCH, function(d){
-        return dbNs.doc("cargas/"+cargaId+"/items/"+d.id).update({estado:"pendiente", asignadoA:null, registros:[]});
+        return dbNs.doc("cargas/"+cargaId+"/items/"+d.id).update({estado:"pendiente", asignadoA:null, registros:[], fisico:[]});
       });
       await this.limpiarTareas(cargaId);
       await dbNs.doc("cargas/"+cargaId).update({operarios:[]});
     } else {
       var s = lsRead(); var c = s.cargas[cargaId]; if(!c) return;
       delete c.tareas;
-      Object.keys(c.items).forEach(function(ref){ c.items[ref].estado="pendiente"; c.items[ref].asignadoA=null; c.items[ref].registros=[]; });
+      Object.keys(c.items).forEach(function(ref){ c.items[ref].estado="pendiente"; c.items[ref].asignadoA=null; c.items[ref].registros=[]; c.items[ref].fisico=[]; });
       c.meta.operarios = [];
       lsWrite(s);
     }
@@ -684,6 +768,48 @@ var Store = {
       it.estado = it.registros.length?"en_progreso":"pendiente";
       lsWrite(s);
     }
+  },
+
+  /* ---- Producto físico en un solo lugar y en varias bodegas (grupo físico) ----
+     El auxiliar cuenta una sola vez: los lotes físicos quedan en la bodega principal (campo "fisico") y la
+     aplicación los reparte entre las bodegas del grupo (campo "registros" de cada una), según su existencia. */
+  async _cambiarFisico(cargaId, g, fn){
+    var base;
+    if(USE_DB){ base = (await dbNs.doc("cargas/"+cargaId+"/items/"+g.lead).get()).data() || {}; }
+    else { base = lsRead().cargas[cargaId].items[g.lead] || {}; }
+    var fisico = fn((base.fisico||[]).slice());
+    var rep = repartirFisico(fisico, g), estado = fisico.length ? "en_progreso" : "pendiente";
+    function campos(id){ var c = {registros:rep[id], estado:estado, grupoFisicoLider:g.lead}; if(id===g.lead) c.fisico = fisico; return c; }
+    if(USE_DB){
+      await inBatches(g.ids, DB_BATCH, function(id){ return dbNs.doc("cargas/"+cargaId+"/items/"+id).update(campos(id)); });
+    } else {
+      var s = lsRead();
+      g.ids.forEach(function(id){ Object.assign(s.cargas[cargaId].items[id], campos(id)); });
+      lsWrite(s);
+    }
+  },
+  async addRegistroGrupo(cargaId, g, registro){ await this._cambiarFisico(cargaId, g, function(f){ return f.concat([registro]); }); },
+  async removeRegistroGrupo(cargaId, g, idx){ await this._cambiarFisico(cargaId, g, function(f){ f.splice(idx,1); return f; }); },
+  async finalizarGrupo(cargaId, g){
+    if(USE_DB){ await inBatches(g.ids, DB_BATCH, function(id){ return dbNs.doc("cargas/"+cargaId+"/items/"+id).update({estado:"finalizado"}); }); }
+    else { var s = lsRead(); g.ids.forEach(function(id){ s.cargas[cargaId].items[id].estado = "finalizado"; }); lsWrite(s); }
+  },
+
+  /* ---- Composición de ofertas virtuales (colección "ofertas": un documento por oferta) ---- */
+  async getOfertas(){
+    var out = {};
+    try{
+      if(USE_DB){
+        var snap = await dbNs.collection("ofertas").get();
+        snap.docs.forEach(function(d){ var x = d.data()||{}; if(x.comps) out[d.id] = {desc:x.desc||"", comps:x.comps}; });
+      } else { var s = lsRead(); out = s.ofertas || {}; }
+    }catch(e){}
+    return out;
+  },
+  async saveOfertas(comp){
+    var codes = Object.keys(comp);
+    if(USE_DB){ await inBatches(codes, DB_BATCH, function(of){ return dbNs.doc("ofertas/"+of).set({desc:comp[of].desc||"", comps:comp[of].comps}); }); }
+    else { var s = lsRead(); s.ofertas = Object.assign(s.ofertas||{}, comp); lsWrite(s); }
   },
 
   /* Tareas finalizadas por auxiliar: un documento por auxiliar en "cargas/<id>/tareas". */
@@ -1646,13 +1772,66 @@ function showUploadModal(){
     (esAdmin
       ? '<div class="field"><label>Ciudad de la carga</label><select id="upCiudad">'+CIUDADES.map(function(c){ return '<option value="'+esc(c.nombre)+'"'+(state._filtroCiudad===c.nombre?" selected":"")+'>'+esc(c.nombre)+' · C.O. '+c.co+'</option>'; }).join("")+'</select></div>'
       : '<p class="hint" style="margin-bottom:8px;">La carga quedará en <b>'+esc(idn.ciudad)+'</b>. Solo los usuarios de esa ciudad (y el administrador) la verán.</p>')+
-    '<p class="hint" style="margin-bottom:12px;">Selecciona el Excel exportado de SIESA (con la <b>Existencia en unidades enteras</b>, no en cajas, y el costo promedio por unidad). Se leen las columnas: Bodega, Desc. bodega, Referencia, Desc. item, U.M., Factor U.M., Existencia, GRUPO SHOPPER, LINEA PROVEEDOR, MARCA, Código barra principal, Costo prom. unit./tot., Calidad Perecedero. El archivo puede traer <b>varias bodegas</b> (por ejemplo general, no disponible y rentas): una misma referencia queda registrada en cada una. Opcionales: <b>"Asignar a"</b> (nombre del auxiliar, se precarga si coincide con un usuario de la ciudad) y <b>"Ubicación"</b> (número de posición para el recorrido guiado). También puedes importar la asignación después, dentro de la carga.</p>'+
+    '<p class="hint" style="margin-bottom:12px;">Selecciona el Excel exportado de SIESA (con la <b>Existencia en unidades enteras</b>, no en cajas, y el costo promedio por unidad). Se leen las columnas: Bodega, Desc. bodega, Referencia, Desc. item, U.M., Factor U.M., Existencia, GRUPO SHOPPER, LINEA PROVEEDOR, MARCA, Código barra principal, Costo prom. unit./tot., Calidad Perecedero. El archivo puede traer <b>varias bodegas</b>: una misma referencia queda registrada en cada una. <b>Solo se cargan las bodegas General (x001), No disponible (x004), Rentas (x005) y Proveedores (x006)</b>; cualquier otra, como averías o destrucción, se omite automáticamente. Opcionales: <b>"Asignar a"</b> (nombre del auxiliar, se precarga si coincide con un usuario de la ciudad) y <b>"Ubicación"</b> (número de posición para el recorrido guiado). También puedes importar la asignación después, dentro de la carga.</p>'+
     '<div class="field"><input type="file" id="fileInput" accept=".xlsx,.xls"></div>'+
     '<div class="field" id="fileStatus" style="font-size:13px;color:var(--muted);"></div>'+
+    '<div id="gruposBox"></div>'+
+    '<div class="field"><label>Composición de ofertas virtuales (opcional)</label><input type="file" id="ofertasInput" accept=".xlsx,.xls">'+
+      '<div class="hint">Excel con las columnas <b>CODIGO OFERA</b>, <b>CODIGO PRODUCTO</b> y <b>CANTIDAD OFERTA</b> (una fila por componente). Las ofertas virtuales (código OF…) se desglosan: su existencia pasa a sus componentes reales. La composición se guarda para las próximas cargas; las ofertas que no estén en ella se cargan como ofertas y se avisa.</div>'+
+      '<div id="ofertasStatus" style="font-size:13px;margin-top:4px;"></div></div>'+
     '<button class="btn primary block" id="mConfirm" disabled>Crear carga</button>'+
   '</div>';
   document.body.appendChild(m);
-  var parsed = null;
+  var parsed = null, rawMapped = null, ofertasGuardadas = {}, ofertasArchivo = {}, desgloseInfo = null, txtOmitG = "";
+  Store.getOfertas().then(function(o){ ofertasGuardadas = o; if(rawMapped) aplicar(); });
+  /* Bodegas que comparten espacio físico con la General: [[codGeneral, codOtra, ...]] o [] */
+  function leerGrupos(){
+    var box = m.querySelector("#gruposBox"), gen = box.getAttribute("data-gen"), sel = [];
+    box.querySelectorAll("input[data-bod]").forEach(function(c){ if(c.checked) sel.push(c.getAttribute("data-bod")); });
+    return (gen && sel.length) ? [[gen].concat(sel)] : [];
+  }
+  /* Arma lo que se va a cargar: desglosa las ofertas con composición y muestra el resumen y el grupo físico. */
+  function aplicar(){
+    var status = m.querySelector("#fileStatus"), box = m.querySelector("#gruposBox");
+    var comp = Object.assign({}, ofertasGuardadas, ofertasArchivo);
+    var d = desglosarOfertas(rawMapped.map(function(x){ return Object.assign({}, x); }), comp);
+    desgloseInfo = d; parsed = d.filas;
+    var mapped = parsed, conTexto = mapped.filter(function(x){ return x.asignarTexto; }).length;
+    var bods = bodegasDe(mapped), nRefs = new Set(mapped.map(function(x){ return x.referencia; })).size;
+    var msg = 'Listo: <b>'+mapped.length+'</b> registros perecederos ('+nRefs+' referencias) en '+(bods.length>1?'<b>'+bods.length+' bodegas</b>':'la bodega')+': '+
+      bods.map(function(b){ return '<b>'+esc(b.cod)+'</b> '+esc(b.desc); }).join(' · ')+'.';
+    if(conTexto) msg += '<br>La columna "Asignar a" trae '+conTexto+' filas; se asignarán las que coincidan con un auxiliar de la ciudad elegida.';
+    if(d.desglosadas) msg += '<br>Ofertas virtuales desglosadas: <b>'+d.desglosadas+'</b>'+(d.creados.length ? ' · componentes agregados que no venían en el archivo: <b>'+d.creados.length+'</b> (sin costo): '+esc(d.creados.slice(0,4).join("; "))+(d.creados.length>4?"…":"") : "")+'.';
+    var sinC = Object.keys(d.sinComp);
+    if(sinC.length) msg += '<br><span style="color:var(--danger);">Ofertas sin composición (se cargan como ofertas, sin desglosar): <b>'+sinC.length+'</b> — '+esc(sinC.slice(0,8).join(", "))+(sinC.length>8?"…":"")+'. Sube el Excel de composición para desglosarlas.</span>';
+    status.innerHTML = msg + txtOmitG;
+    /* grupo físico: la General y las bodegas que comparten su espacio */
+    var prev = {}; box.querySelectorAll("input[data-bod]").forEach(function(c){ prev[c.getAttribute("data-bod")] = c.checked; });
+    var gen = bods.filter(function(b){ return b.cod.slice(-3)==="001"; })[0], otras = bods.filter(function(b){ return b.cod.slice(-3)!=="001"; });
+    if(gen && otras.length){
+      box.setAttribute("data-gen", gen.cod);
+      box.innerHTML = '<div class="field"><label>Bodegas que comparten el mismo espacio físico con la General ('+esc(gen.cod)+')</label>'+
+        otras.map(function(b){ var on = prev[b.cod]!==undefined ? prev[b.cod] : b.cod.slice(-3)==="004";
+          return '<label style="display:flex;gap:8px;align-items:center;font-weight:400;margin:2px 0;"><input type="checkbox" data-bod="'+esc(b.cod)+'"'+(on?" checked":"")+'> <span>'+esc(b.cod)+' '+esc(b.desc)+'</span></label>'; }).join("")+
+        '<div class="hint">Marca las que, por falta de espacio, tienen el producto en el mismo sitio que la General. Esas referencias se cuentan <b>una sola vez</b> y la aplicación reparte la cantidad entre las bodegas según el sistema.</div></div>';
+    } else { box.removeAttribute("data-gen"); box.innerHTML = ""; }
+    m.querySelector("#mConfirm").disabled = false;
+  }
+  m.querySelector("#ofertasInput").onchange = function(e){
+    var f = e.target.files[0]; if(!f) return;
+    var st = m.querySelector("#ofertasStatus"), rd = new FileReader();
+    rd.onload = function(ev){
+      try{
+        var wb = XLSX.read(ev.target.result, {type:"array"});
+        var rows = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], {defval:""});
+        ofertasArchivo = parseComposicionOfertas(rows, colExcel);
+        var n = Object.keys(ofertasArchivo).length;
+        st.innerHTML = n ? 'Composición leída: <b>'+n+'</b> ofertas.' : '<span style="color:var(--danger);">No se encontraron ofertas. Revisa las columnas CODIGO OFERA, CODIGO PRODUCTO y CANTIDAD OFERTA.</span>';
+        if(rawMapped) aplicar();
+      }catch(err){ st.innerHTML = '<span style="color:var(--danger);">No se pudo leer el archivo de ofertas.</span>'; }
+    };
+    rd.readAsArrayBuffer(f);
+  };
   function ciudadElegida(){ var s = m.querySelector("#upCiudad"); return s ? s.value : idn.ciudad; }
   var resolverAsignado = resolverAsignadoCiudad;
   m.querySelector("#mClose").onclick = function(){ m.remove(); };
@@ -1687,15 +1866,16 @@ function showUploadModal(){
             ubicacion: limpiarUbic(colExcel(r, ["Ubicación","Ubicacion","Posición","Posicion","Ubic"]))
           };
         }).filter(function(x){ return x.referencia && x.perecedero==="si"; });
-        if(!mapped.length){ status.innerHTML = '<span style="color:var(--danger);">No se encontraron filas con Calidad Perecedero = "si". Revisa el archivo.</span>'; return; }
-        parsed = mapped;
-        var conTexto = mapped.filter(function(x){ return x.asignarTexto; }).length;
-        var bods = bodegasDe(mapped), nRefs = new Set(mapped.map(function(x){ return x.referencia; })).size;
-        var msg = 'Listo: <b>'+mapped.length+'</b> registros perecederos ('+nRefs+' referencias) en '+(bods.length>1?'<b>'+bods.length+' bodegas</b>':'la bodega')+': '+
-          bods.map(function(b){ return '<b>'+esc(b.cod)+'</b> '+esc(b.desc); }).join(' · ')+'.';
-        if(conTexto) msg += '<br>La columna "Asignar a" trae '+conTexto+' filas; se asignarán las que coincidan con un auxiliar de la ciudad elegida.';
-        status.innerHTML = msg;
-        m.querySelector("#mConfirm").disabled = false;
+        /* Se descartan las bodegas que no son General, No disponible, Rentas ni Proveedores. */
+        var omitidas = {}, nOmit = 0;
+        mapped = mapped.filter(function(x){
+          if(bodegaPermitida(x.bodega)) return true;
+          var k = (x.bodega||"(sin código)")+(x.bodegaDesc?" "+x.bodegaDesc:""); omitidas[k] = (omitidas[k]||0)+1; nOmit++; return false;
+        });
+        var txtOmit = nOmit ? '<br><span style="color:var(--danger);">Se omitieron <b>'+nOmit+'</b> registros de bodegas no permitidas: '+Object.keys(omitidas).map(function(k){ return esc(k)+' ('+omitidas[k]+')'; }).join(' · ')+'.</span>' : '';
+        if(!mapped.length){ status.innerHTML = '<span style="color:var(--danger);">No se encontraron filas perecederas (Calidad Perecedero = "si") en bodegas General, No disponible, Rentas o Proveedores. Revisa el archivo.</span>'+txtOmit; return; }
+        rawMapped = mapped; txtOmitG = txtOmit;
+        aplicar();
       }catch(err){
         status.innerHTML = '<span style="color:var(--danger);">No se pudo leer el archivo: '+esc(err.message||err)+'</span>';
       }
@@ -1731,6 +1911,9 @@ function showUploadModal(){
     }catch(e){}
     var operarios = Array.from(new Set(items.filter(function(x){return x.asignadoA;}).map(function(x){return x.asignadoA;})));
     var meta = {bodega:bodegas.map(function(b){ return b.cod; }).join(" · "), bodegaDesc:bodegas.map(function(b){ return b.desc; }).filter(Boolean).join(" · "), bodegas:bodegas, ciudad:ciudad, co:c?c.co:"", creadoPor:idn.nombre, creadoPorId:idn.id, totalItems:items.length, operarios:operarios};
+    meta.gruposFisicos = leerGrupos();
+    if(desgloseInfo){ meta.ofertasDesglosadas = desgloseInfo.desglosadas; meta.ofertasSinComposicion = Object.keys(desgloseInfo.sinComp); }
+    if(Object.keys(ofertasArchivo).length){ try{ await Store.saveOfertas(ofertasArchivo); }catch(e){} }
     var cid = await Store.createCarga(meta, items);
     m.remove();
     openCarga(cid);
@@ -2482,11 +2665,39 @@ function openCargaOperario(id){
 }
 
 /* ================= operario: mis referencias ================= */
+/* ---- grupo físico: bodegas del sistema que comparten el mismo espacio ----
+   El coordinador las marca al cargar (campo gruposFisicos de la carga). Para esas bodegas, una referencia que esté en
+   2 o más de ellas se cuenta UNA vez, en la bodega principal (la de mayor existencia); las demás quedan ocultas al
+   auxiliar y se llenan solas con el reparto. */
+function grupoInfo(it){
+  var carga = (state.cargas||[]).filter(function(c){ return c.id===state.currentCargaId; })[0];
+  var gs = (carga && carga.gruposFisicos) || [];
+  if(!gs.length) return null;
+  var b = String(it.bodega||"").trim(), ref = String(it.referencia).trim();
+  for(var i=0;i<gs.length;i++){
+    if(gs[i].indexOf(b)<0) continue;
+    var m = state.items.filter(function(x){ return String(x.referencia).trim()===ref && gs[i].indexOf(String(x.bodega||"").trim())>=0; });
+    if(m.length<2) continue;
+    m.sort(function(a,c){ return (Number(c.existenciaUM)||0)-(Number(a.existenciaUM)||0) || String(a.bodega).localeCompare(String(c.bodega)); });
+    var ex = {}; m.forEach(function(x){ ex[x.id] = Number(x.existenciaUM)||0; });
+    return {ids:m.map(function(x){ return x.id; }), lead:m[0].id, ex:ex, bodegas:m.map(function(x){ return String(x.bodega||"").trim(); })};
+  }
+  return null;
+}
+function esSeguidor(it){ var g = grupoInfo(it); return !!g && g.lead!==it.id; }
+
 function myItems(){
-  return state.items.filter(function(it){ return it.asignadoA === state.identity.id; });
+  var me = state.identity.id;
+  return state.items.filter(function(it){
+    var g = grupoInfo(it);
+    if(!g) return it.asignadoA === me;
+    if(g.lead!==it.id) return false;
+    if(it.asignadoA) return it.asignadoA===me;   /* la bodega principal manda: si tiene auxiliar, solo ese lo cuenta */
+    return state.items.some(function(x){ return g.ids.indexOf(x.id)>=0 && x.asignadoA===me; });
+  });
 }
 /* Con referencias asignadas se escanea/busca solo entre ellas; sin asignación, entre todas las de la carga. */
-function alcanceItems(){ var m = myItems(); return m.length ? m : state.items; }
+function alcanceItems(){ var m = myItems(); return m.length ? m : state.items.filter(function(it){ return !esSeguidor(it); }); }
 
 /* Orden del recorrido guiado: número de ubicación (varias referencias pueden compartirla) y luego código de referencia. */
 function ubicNum(u){ var n = parseFloat(String(u==null?"":u).replace(",",".")); return isNaN(n) ? null : n; }
@@ -2817,6 +3028,8 @@ function fechaDeSelects(){
 function renderOperarioEntry(){
   var it = state.items.find(function(x){return x.id===state.activeItemId;});
   if(!it){ setState({view:"mine"}); return; }
+  var g = grupoInfo(it);
+  if(g && g.lead!==it.id){ state.activeItemId = g.lead; it = state.items.find(function(x){return x.id===g.lead;}) || it; }
   var html = renderTopbar() + '<div class="wrap narrow">';
   html += '<button class="btn ghost sm" id="backBtn" style="margin-bottom:8px;">← Volver a mi lista</button>';
 
@@ -2829,7 +3042,8 @@ function renderOperarioEntry(){
   html += '<div class="card" style="margin-bottom:14px;">'+
     '<p class="eyebrow">Ref. '+esc(it.referencia)+' · '+esc(it.um)+'</p>'+
     '<h1 style="font-size:19px;margin-bottom:8px;">'+esc(it.descItem)+'</h1>'+
-    (it.bodega ? '<div class="hint" style="margin-bottom:6px;"><span class="pill amber">Bodega '+esc(bodegaTxt(it))+'</span></div>' : '')+
+    (g ? '<div class="banner" style="padding:8px 12px;font-size:13px;margin-bottom:8px;">Este producto está en <b>'+g.bodegas.length+' bodegas</b> del sistema ('+esc(g.bodegas.join(", "))+') que comparten el mismo espacio físico. <b>Cuéntalo una sola vez</b>, todo lo que veas: la aplicación reparte la cantidad entre las bodegas.</div>'
+       : (it.bodega ? '<div class="hint" style="margin-bottom:6px;"><span class="pill amber">Bodega '+esc(bodegaTxt(it))+'</span></div>' : ''))+
     '<div class="hint">Código de barras SIESA: <span class="mono">'+esc(it.barcode||"—")+'</span></div>'+
     '<div class="hint">Grupo Shopper: '+esc(it.grupoShopper||"—")+'</div>'+
   '</div>';
@@ -2841,7 +3055,7 @@ function renderOperarioEntry(){
     '<button class="btn primary block" id="btnSaveLote">Guardar conteo</button>'+
   '</div>';
 
-  var regs = it.registros || [];
+  var regs = (g ? it.fisico : it.registros) || [];
   html += '<div class="card">'+
     '<h3 style="font-size:15px;margin-bottom:10px;">Conteos registrados ('+regs.length+')</h3>';
   if(!regs.length){
@@ -2873,12 +3087,14 @@ function renderOperarioEntry(){
     var btn = root.querySelector("#btnSaveLote"); if(btn) btn.disabled = true;
     try{
       if(fecha < todayISO() && !(await askConfirm("La fecha "+fecha+" ya pasó. ¿Confirmas que este producto está físicamente vencido?"))){ return; }
-      var repetido = (it.registros||[]).some(function(r){ return Number(r.cantidad)===cant && r.fechaVenc===fecha; });
+      var repetido = regs.some(function(r){ return Number(r.cantidad)===cant && r.fechaVenc===fecha; });
       if(repetido && !(await askConfirm("Ya registraste "+fmtNum(cant,0)+" und con vencimiento "+fecha+" en esta referencia. ¿Es otro conteo distinto (por ejemplo otra estiba)? Si fue un doble toque, elige Cancelar."))){ return; }
-      await Store.addRegistro(state.currentCargaId, it.id, {
+      var nuevoLote = {
         cantidad:cant, fechaVenc:fecha, capturadoPor:state.identity.id, capturadoEn:new Date().toISOString(),
         confirmadoManual: state._entryManualConfirm, codigoEscaneado: state._entryScannedCode
-      });
+      };
+      if(g) await Store.addRegistroGrupo(state.currentCargaId, g, nuevoLote);
+      else await Store.addRegistro(state.currentCargaId, it.id, nuevoLote);
       state._entryCantidad = ""; state._entryManualConfirm = false; state._entryScannedCode = null;
       state._entryFecha = ""; state._eD = ""; state._eM = ""; state._eY = "";
       render();
@@ -2891,12 +3107,16 @@ function renderOperarioEntry(){
     b.onclick = async function(){
       if(state._borrandoConteo) return;
       state._borrandoConteo = true;
-      try{ await Store.removeRegistro(state.currentCargaId, it.id, parseInt(b.getAttribute("data-idx"),10)); render(); }
+      try{
+        var ix = parseInt(b.getAttribute("data-idx"),10);
+        if(g) await Store.removeRegistroGrupo(state.currentCargaId, g, ix); else await Store.removeRegistro(state.currentCargaId, it.id, ix);
+        render();
+      }
       finally{ state._borrandoConteo = false; }
     };
   });
   var doneBtn = root.querySelector("#btnDone");
-  if(doneBtn) doneBtn.onclick = async function(){ await Store.finalizarItem(state.currentCargaId, it.id); setState({view:"mine"}); };
+  if(doneBtn) doneBtn.onclick = async function(){ if(g) await Store.finalizarGrupo(state.currentCargaId, g); else await Store.finalizarItem(state.currentCargaId, it.id); setState({view:"mine"}); };
 }
 
 /* ================= main render dispatcher ================= */
