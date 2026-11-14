@@ -790,8 +790,9 @@ var Store = {
   },
   /* El auxiliar indica que el producto está (o no) en lugares separados por bodega. Se limpian los conteos del producto
      en todas las bodegas del grupo para recontarlo con el criterio nuevo. */
-  async setSeparado(cargaId, ids, separado, auxId){
-    var campos = {espacioSeparado:!!separado, separadoPor:auxId, registros:[], fisico:[], estado:"pendiente", grupoFisicoLider:null};
+  /* modo: "separado" (cada bodega por su lado), "junto" (todo en un solo lugar, aunque no se marcó al cargar) o "defecto" (el criterio de la carga) */
+  async setEspacio(cargaId, ids, modo, auxId){
+    var campos = {espacioSeparado:modo==="separado", espacioJunto:modo==="junto", separadoPor:auxId, registros:[], fisico:[], estado:"pendiente", grupoFisicoLider:null};
     if(USE_DB){ await inBatches(ids, DB_BATCH, function(id){ return dbNs.doc("cargas/"+cargaId+"/items/"+id).update(campos); }); }
     else { var s = lsRead(); ids.forEach(function(id){ Object.assign(s.cargas[cargaId].items[id], campos); }); lsWrite(s); }
   },
@@ -2681,18 +2682,20 @@ function openCargaOperario(id){
 function grupoBase(it){
   var carga = (state.cargas||[]).filter(function(c){ return c.id===state.currentCargaId; })[0];
   var gs = (carga && carga.gruposFisicos) || [];
-  if(!gs.length) return null;
   var b = String(it.bodega||"").trim(), ref = String(it.referencia).trim();
-  for(var i=0;i<gs.length;i++){
-    if(gs[i].indexOf(b)<0) continue;
-    var m = state.items.filter(function(x){ return String(x.referencia).trim()===ref && gs[i].indexOf(String(x.bodega||"").trim())>=0; });
-    if(m.length<2) continue;
-    m.sort(function(a,c){ return (Number(c.existenciaUM)||0)-(Number(a.existenciaUM)||0) || String(a.bodega).localeCompare(String(c.bodega)); });
-    var ex = {}; m.forEach(function(x){ ex[x.id] = Number(x.existenciaUM)||0; });
-    return {ids:m.map(function(x){ return x.id; }), lead:m[0].id, ex:ex, bodegas:m.map(function(x){ return String(x.bodega||"").trim(); }),
-            separado:m.some(function(x){ return x.espacioSeparado===true; }), separadoPor:(m.filter(function(x){ return x.separadoPor; })[0]||{}).separadoPor||null};
-  }
-  return null;
+  var mismos = state.items.filter(function(x){ return String(x.referencia).trim()===ref; });
+  /* grupo configurado al cargar (bodegas que comparten espacio) + productos que el auxiliar marcó como "todo en un solo lugar" */
+  var m = [], i;
+  for(i=0;i<gs.length;i++){ if(gs[i].indexOf(b)>=0){ m = mismos.filter(function(x){ return gs[i].indexOf(String(x.bodega||"").trim())>=0; }); break; } }
+  var ids = {}; m.forEach(function(x){ ids[x.id] = 1; });
+  mismos.forEach(function(x){ if(x.espacioJunto===true) ids[x.id] = 1; });
+  if(!ids[it.id]) return null;
+  m = mismos.filter(function(x){ return ids[x.id]; });
+  if(m.length<2) return null;
+  m.sort(function(a,c){ return (Number(c.existenciaUM)||0)-(Number(a.existenciaUM)||0) || String(a.bodega).localeCompare(String(c.bodega)); });
+  var ex = {}; m.forEach(function(x){ ex[x.id] = Number(x.existenciaUM)||0; });
+  return {ids:m.map(function(x){ return x.id; }), lead:m[0].id, ex:ex, bodegas:m.map(function(x){ return String(x.bodega||"").trim(); }),
+          separado:m.some(function(x){ return x.espacioSeparado===true; }), separadoPor:(m.filter(function(x){ return x.separadoPor; })[0]||{}).separadoPor||null};
 }
 function grupoInfo(it){ var g = grupoBase(it); return (g && !g.separado) ? g : null; }
 function esSeguidor(it){ var g = grupoInfo(it); return !!g && g.lead!==it.id; }
@@ -2963,7 +2966,7 @@ function showElegirBodegaModal(lista){
   var m = document.createElement("div");
   m.className = "modal-bg";
   m.innerHTML = '<div class="modal"><div class="modal-head"><h2 style="font-size:17px;">¿En qué bodega estás?</h2><button id="ebClose">×</button></div>'+
-    '<p class="hint" style="margin-bottom:8px;">'+esc(lista[0].descItem)+' está en varias bodegas. Elige la que estás contando.</p>'+
+    '<p class="hint" style="margin-bottom:8px;">'+esc(lista[0].descItem)+' está en varias bodegas. Elige la que estás contando. Si lo ves todo en un mismo lugar, elige cualquiera y márcalo en la siguiente pantalla.</p>'+
     lista.map(function(it){
       var n = (it.registros||[]).length;
       return '<div class="item-row" data-id="'+esc(it.id)+'"><div class="ico" style="font-weight:700;">'+esc(it.bodega||"·")+'</div><div class="info"><div class="t">'+esc(bodegaTxt(it)||"Sin bodega")+'</div>'+
@@ -3060,6 +3063,8 @@ function renderOperarioEntry(){
   var g = grupoInfo(it);
   if(g && g.lead!==it.id){ state.activeItemId = g.lead; it = state.items.find(function(x){return x.id===g.lead;}) || it; }
   var gb = grupoBase(it);   /* si no es null y g sí lo es, el auxiliar marcó este producto como separado por bodega */
+  /* otras bodegas del sistema donde está la misma referencia, cuando el producto se está contando por bodega */
+  var otras = (!g && !gb) ? state.items.filter(function(x){ return String(x.referencia).trim()===String(it.referencia).trim() && x.id!==it.id; }) : [];
   var html = renderTopbar() + '<div class="wrap narrow">';
   html += '<button class="btn ghost sm" id="backBtn" style="margin-bottom:8px;">← Volver a mi lista</button>';
 
@@ -3080,7 +3085,9 @@ function renderOperarioEntry(){
               var x = state.items.find(function(i){ return i.id===id; }); if(!x) return "";
               return id===it.id ? '<span class="pill amber">Contando: '+esc(bodegaTxt(x))+'</span>'
                                 : '<button class="btn sm btnOtraBodega" type="button" data-id="'+esc(id)+'">Ir a '+esc(bodegaTxt(x))+'</button>'; }).join("")+'</div>'+
-            '<div style="margin-top:8px;"><button class="btn sm" id="btnJuntar" type="button">Volver a contar todo junto (comparten espacio)</button></div></div>' : ''))+
+            '<div style="margin-top:8px;"><button class="btn sm" id="btnJuntar" type="button">Volver a contar todo junto (comparten espacio)</button></div></div>'
+          : (otras.length ? '<div class="banner" style="padding:8px 12px;font-size:13px;margin-bottom:8px;">Este producto también está en otra(s) bodega(s) del sistema: <b>'+esc(otras.map(function(x){ return String(x.bodega||"").trim(); }).join(", "))+'</b>. Si lo ves <b>todo en un mismo lugar</b>, márcalo y lo cuentas una sola vez (la aplicación reparte la cantidad entre las bodegas).'+
+            '<div style="margin-top:8px;"><button class="btn sm" id="btnJunto2" type="button">Sí, está todo en un solo lugar</button></div></div>' : '')))+
     '<div class="hint">Código de barras SIESA: <span class="mono">'+esc(it.barcode||"—")+'</span></div>'+
     '<div class="hint">Grupo Shopper: '+esc(it.grupoShopper||"—")+'</div>'+
   '</div>';
@@ -3111,22 +3118,27 @@ function renderOperarioEntry(){
 
   root.querySelector("#backBtn").onclick = function(){ setState({view:"mine"}); };
   /* El auxiliar es quien ve el producto: él decide si está junto o separado por bodega. Cambiarlo borra los conteos del producto. */
-  async function cambiarSeparado(ids, separado, nLotes, msg){
+  async function cambiarEspacio(ids, modo, nLotes, msg){
     if(nLotes && !(await askConfirm(msg))) return;
-    await Store.setSeparado(state.currentCargaId, ids, separado, state.identity.id);
-    state.items.forEach(function(x){ if(ids.indexOf(x.id)>=0) Object.assign(x, {espacioSeparado:separado, separadoPor:state.identity.id, registros:[], fisico:[], estado:"pendiente", grupoFisicoLider:null}); });
+    await Store.setEspacio(state.currentCargaId, ids, modo, state.identity.id);
+    state.items.forEach(function(x){ if(ids.indexOf(x.id)>=0) Object.assign(x, {espacioSeparado:modo==="separado", espacioJunto:modo==="junto", separadoPor:state.identity.id, registros:[], fisico:[], estado:"pendiente", grupoFisicoLider:null}); });
     state._entryCantidad = ""; state._eD = ""; state._eM = ""; state._eY = "";
     render();
   }
   var bSep = root.querySelector("#btnSeparar");
   if(bSep) bSep.onclick = function(){
     var n = (it.fisico||[]).length;
-    cambiarSeparado(g.ids, true, n, "Ya registraste "+n+" conteo(s) de este producto. Al marcarlo como separado por bodega se borrarán, para que lo cuentes de nuevo en cada bodega. ¿Continuar?");
+    cambiarEspacio(g.ids, "separado", n, "Ya registraste "+n+" conteo(s) de este producto. Al marcarlo como separado por bodega se borrarán, para que lo cuentes de nuevo en cada bodega. ¿Continuar?");
   };
   var bJun = root.querySelector("#btnJuntar");
   if(bJun) bJun.onclick = function(){
     var n = gb.ids.reduce(function(s,id){ var x = state.items.find(function(i){ return i.id===id; }); return s + ((x && x.registros)?x.registros.length:0); }, 0);
-    cambiarSeparado(gb.ids, false, n, "Ya hay "+n+" conteo(s) de este producto en sus bodegas. Al volver a contar todo junto se borrarán, para que lo cuentes una sola vez. ¿Continuar?");
+    cambiarEspacio(gb.ids, "defecto", n, "Ya hay "+n+" conteo(s) de este producto en sus bodegas. Al volver a contar todo junto se borrarán, para que lo cuentes una sola vez. ¿Continuar?");
+  };
+  var bJ2 = root.querySelector("#btnJunto2");
+  if(bJ2) bJ2.onclick = function(){
+    var todos = [it].concat(otras), n = todos.reduce(function(s,x){ return s + ((x.registros||[]).length); }, 0);
+    cambiarEspacio(todos.map(function(x){ return x.id; }), "junto", n, "Ya hay "+n+" conteo(s) de este producto en sus bodegas. Al contarlo todo junto se borrarán, para que lo cuentes una sola vez. ¿Continuar?");
   };
   root.querySelectorAll(".btnOtraBodega").forEach(function(b){ b.onclick = function(){ openEntry(b.getAttribute("data-id"), false); }; });
   root.querySelector("#cantInput").oninput = function(e){ state._entryCantidad = e.target.value; };
