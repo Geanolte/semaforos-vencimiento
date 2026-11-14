@@ -788,6 +788,13 @@ var Store = {
       lsWrite(s);
     }
   },
+  /* El auxiliar indica que el producto está (o no) en lugares separados por bodega. Se limpian los conteos del producto
+     en todas las bodegas del grupo para recontarlo con el criterio nuevo. */
+  async setSeparado(cargaId, ids, separado, auxId){
+    var campos = {espacioSeparado:!!separado, separadoPor:auxId, registros:[], fisico:[], estado:"pendiente", grupoFisicoLider:null};
+    if(USE_DB){ await inBatches(ids, DB_BATCH, function(id){ return dbNs.doc("cargas/"+cargaId+"/items/"+id).update(campos); }); }
+    else { var s = lsRead(); ids.forEach(function(id){ Object.assign(s.cargas[cargaId].items[id], campos); }); lsWrite(s); }
+  },
   async addRegistroGrupo(cargaId, g, registro){ await this._cambiarFisico(cargaId, g, function(f){ return f.concat([registro]); }); },
   async removeRegistroGrupo(cargaId, g, idx){ await this._cambiarFisico(cargaId, g, function(f){ f.splice(idx,1); return f; }); },
   async finalizarGrupo(cargaId, g){
@@ -2669,7 +2676,9 @@ function openCargaOperario(id){
    El coordinador las marca al cargar (campo gruposFisicos de la carga). Para esas bodegas, una referencia que esté en
    2 o más de ellas se cuenta UNA vez, en la bodega principal (la de mayor existencia); las demás quedan ocultas al
    auxiliar y se llenan solas con el reparto. */
-function grupoInfo(it){
+/* grupoBase: el grupo "posible" de este producto según las bodegas marcadas al cargar (ignora si el auxiliar lo separó).
+   grupoInfo: el grupo que realmente se usa; es null si el auxiliar marcó que el producto está separado por bodega. */
+function grupoBase(it){
   var carga = (state.cargas||[]).filter(function(c){ return c.id===state.currentCargaId; })[0];
   var gs = (carga && carga.gruposFisicos) || [];
   if(!gs.length) return null;
@@ -2680,18 +2689,21 @@ function grupoInfo(it){
     if(m.length<2) continue;
     m.sort(function(a,c){ return (Number(c.existenciaUM)||0)-(Number(a.existenciaUM)||0) || String(a.bodega).localeCompare(String(c.bodega)); });
     var ex = {}; m.forEach(function(x){ ex[x.id] = Number(x.existenciaUM)||0; });
-    return {ids:m.map(function(x){ return x.id; }), lead:m[0].id, ex:ex, bodegas:m.map(function(x){ return String(x.bodega||"").trim(); })};
+    return {ids:m.map(function(x){ return x.id; }), lead:m[0].id, ex:ex, bodegas:m.map(function(x){ return String(x.bodega||"").trim(); }),
+            separado:m.some(function(x){ return x.espacioSeparado===true; }), separadoPor:(m.filter(function(x){ return x.separadoPor; })[0]||{}).separadoPor||null};
   }
   return null;
 }
+function grupoInfo(it){ var g = grupoBase(it); return (g && !g.separado) ? g : null; }
 function esSeguidor(it){ var g = grupoInfo(it); return !!g && g.lead!==it.id; }
 
 function myItems(){
   var me = state.identity.id;
   return state.items.filter(function(it){
     var g = grupoInfo(it);
-    if(!g) return it.asignadoA === me;
+    if(!g) return it.asignadoA === me || it.separadoPor === me;   /* separado por el auxiliar: sus bodegas le aparecen aunque no se las hayan asignado */
     if(g.lead!==it.id) return false;
+    if(it.separadoPor===me) return true;
     if(it.asignadoA) return it.asignadoA===me;   /* la bodega principal manda: si tiene auxiliar, solo ese lo cuenta */
     return state.items.some(function(x){ return g.ids.indexOf(x.id)>=0 && x.asignadoA===me; });
   });
@@ -3030,6 +3042,7 @@ function renderOperarioEntry(){
   if(!it){ setState({view:"mine"}); return; }
   var g = grupoInfo(it);
   if(g && g.lead!==it.id){ state.activeItemId = g.lead; it = state.items.find(function(x){return x.id===g.lead;}) || it; }
+  var gb = grupoBase(it);   /* si no es null y g sí lo es, el auxiliar marcó este producto como separado por bodega */
   var html = renderTopbar() + '<div class="wrap narrow">';
   html += '<button class="btn ghost sm" id="backBtn" style="margin-bottom:8px;">← Volver a mi lista</button>';
 
@@ -3042,8 +3055,15 @@ function renderOperarioEntry(){
   html += '<div class="card" style="margin-bottom:14px;">'+
     '<p class="eyebrow">Ref. '+esc(it.referencia)+' · '+esc(it.um)+'</p>'+
     '<h1 style="font-size:19px;margin-bottom:8px;">'+esc(it.descItem)+'</h1>'+
-    (g ? '<div class="banner" style="padding:8px 12px;font-size:13px;margin-bottom:8px;">Este producto está en <b>'+g.bodegas.length+' bodegas</b> del sistema ('+esc(g.bodegas.join(", "))+') que comparten el mismo espacio físico. <b>Cuéntalo una sola vez</b>, todo lo que veas: la aplicación reparte la cantidad entre las bodegas.</div>'
-       : (it.bodega ? '<div class="hint" style="margin-bottom:6px;"><span class="pill amber">Bodega '+esc(bodegaTxt(it))+'</span></div>' : ''))+
+    (g ? '<div class="banner" style="padding:8px 12px;font-size:13px;margin-bottom:8px;">Este producto está en <b>'+g.bodegas.length+' bodegas</b> del sistema ('+esc(g.bodegas.join(", "))+') que comparten el mismo espacio físico. <b>Cuéntalo una sola vez</b>, todo lo que veas: la aplicación reparte la cantidad entre las bodegas.'+
+         '<div style="margin-top:8px;"><button class="btn sm" id="btnSeparar" type="button">Este producto está en lugares separados por bodega</button></div></div>'
+       : (it.bodega ? '<div class="hint" style="margin-bottom:6px;"><span class="pill amber">Bodega '+esc(bodegaTxt(it))+'</span></div>' : '')+
+         (gb ? '<div class="banner warn" style="padding:8px 12px;font-size:13px;margin-bottom:8px;">Este producto está <b>separado por bodega</b>: cuenta cada bodega por separado.'+
+            '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px;">'+gb.ids.map(function(id){
+              var x = state.items.find(function(i){ return i.id===id; }); if(!x) return "";
+              return id===it.id ? '<span class="pill amber">Contando: '+esc(bodegaTxt(x))+'</span>'
+                                : '<button class="btn sm btnOtraBodega" type="button" data-id="'+esc(id)+'">Ir a '+esc(bodegaTxt(x))+'</button>'; }).join("")+'</div>'+
+            '<div style="margin-top:8px;"><button class="btn sm" id="btnJuntar" type="button">Volver a contar todo junto (comparten espacio)</button></div></div>' : ''))+
     '<div class="hint">Código de barras SIESA: <span class="mono">'+esc(it.barcode||"—")+'</span></div>'+
     '<div class="hint">Grupo Shopper: '+esc(it.grupoShopper||"—")+'</div>'+
   '</div>';
@@ -3073,6 +3093,25 @@ function renderOperarioEntry(){
   wireTopbar();
 
   root.querySelector("#backBtn").onclick = function(){ setState({view:"mine"}); };
+  /* El auxiliar es quien ve el producto: él decide si está junto o separado por bodega. Cambiarlo borra los conteos del producto. */
+  async function cambiarSeparado(ids, separado, nLotes, msg){
+    if(nLotes && !(await askConfirm(msg))) return;
+    await Store.setSeparado(state.currentCargaId, ids, separado, state.identity.id);
+    state.items.forEach(function(x){ if(ids.indexOf(x.id)>=0) Object.assign(x, {espacioSeparado:separado, separadoPor:state.identity.id, registros:[], fisico:[], estado:"pendiente", grupoFisicoLider:null}); });
+    state._entryCantidad = ""; state._eD = ""; state._eM = ""; state._eY = "";
+    render();
+  }
+  var bSep = root.querySelector("#btnSeparar");
+  if(bSep) bSep.onclick = function(){
+    var n = (it.fisico||[]).length;
+    cambiarSeparado(g.ids, true, n, "Ya registraste "+n+" conteo(s) de este producto. Al marcarlo como separado por bodega se borrarán, para que lo cuentes de nuevo en cada bodega. ¿Continuar?");
+  };
+  var bJun = root.querySelector("#btnJuntar");
+  if(bJun) bJun.onclick = function(){
+    var n = gb.ids.reduce(function(s,id){ var x = state.items.find(function(i){ return i.id===id; }); return s + ((x && x.registros)?x.registros.length:0); }, 0);
+    cambiarSeparado(gb.ids, false, n, "Ya hay "+n+" conteo(s) de este producto en sus bodegas. Al volver a contar todo junto se borrarán, para que lo cuentes una sola vez. ¿Continuar?");
+  };
+  root.querySelectorAll(".btnOtraBodega").forEach(function(b){ b.onclick = function(){ openEntry(b.getAttribute("data-id"), false); }; });
   root.querySelector("#cantInput").oninput = function(e){ state._entryCantidad = e.target.value; };
   [["#fDia","_eD"],["#fMes","_eM"],["#fAnio","_eY"]].forEach(function(p){
     root.querySelector(p[0]).onchange = function(e){ state[p[1]] = e.target.value; state._entryFecha = fechaDeSelects(); };
