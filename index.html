@@ -74,7 +74,7 @@ input:focus-visible, button:focus-visible, select:focus-visible{ outline:2px sol
   padding:12px 18px; background:var(--surface); border-bottom:1px solid var(--border);
 }
 .brand{ display:flex; align-items:center; gap:9px; }
-.brand .mark{ width:26px; height:38px; flex:0 0 auto; }
+.brand .mark{ width:36px; height:36px; flex:0 0 auto; }
 .brand b{ font-family:"Quicksand",sans-serif; font-size:17px; font-weight:700; }
 .brand .sub{ font-size:11px; color:var(--muted); font-family:"IBM Plex Mono",monospace; letter-spacing:.04em; }
 .who{ display:flex; align-items:center; gap:10px; font-size:13px; color:var(--ink-soft); }
@@ -95,7 +95,7 @@ input:focus-visible, button:focus-visible, select:focus-visible{ outline:2px sol
 .chipf.mute{ border-color:var(--border); color:var(--muted); }
 .chipf.on{ background:var(--accent); border-color:var(--accent); color:var(--on-accent); }
 .topbar.compact{ padding:6px 10px; gap:8px; flex-wrap:nowrap; }
-.topbar.compact .brand .mark{ width:20px; height:30px; }
+.topbar.compact .brand .mark{ width:30px; height:30px; }
 .topbar.compact .who{ gap:8px; font-size:13px; margin-left:auto; flex-wrap:nowrap; }
 .topbar.compact .who button{ padding:4px 12px; }
 .topbar.compact #themeToggle{ width:28px; height:28px; padding:0; }
@@ -117,6 +117,40 @@ input:focus-visible, button:focus-visible, select:focus-visible{ outline:2px sol
 .nx-ref{ font-size:12px; color:var(--muted); }
 .wrap{ max-width:1080px; margin:0 auto; padding:22px 18px 80px; }
 .wrap.narrow{ max-width:480px; }
+
+/* ---------- escritorio: menú lateral oscuro (coordinador y administrador) ---------- */
+#app.shell{ display:grid; grid-template-columns:var(--side-w,252px) minmax(0,1fr); grid-template-rows:auto 1fr; min-height:100vh; transition:grid-template-columns .18s ease; }
+#app.shell.side-min{ --side-w:78px; }
+#app.shell > .side{ grid-column:1; grid-row:1 / span 2; }
+#app.shell > .topbar, #app.shell > .wrap{ grid-column:2; min-width:0; }
+#app.shell > .wrap{ width:100%; max-width:1320px; margin:0; padding:24px 32px 80px; }
+#app.shell .admin-nav{ display:none; }
+.topbar.shellbar{ padding:14px 32px; }
+.topbar.shellbar .sh-title{ font-family:"Quicksand",sans-serif; font-size:19px; font-weight:700; color:var(--ink); }
+.side{ position:sticky; top:0; align-self:start; height:100vh; background:#1A1815; color:#C2B29A; display:flex; flex-direction:column; padding:18px 12px 14px; gap:4px; overflow:hidden; }
+.side .s-brand{ display:flex; align-items:center; gap:11px; padding:2px 6px 18px; min-height:56px; }
+.side .s-brand .mark{ width:38px; height:38px; flex:0 0 auto; }
+.side .s-brand b{ display:block; color:#F2EFE6; font-family:"Quicksand",sans-serif; font-size:18px; line-height:1.1; }
+.side .s-brand small{ display:block; color:#9A9284; font-size:10.5px; letter-spacing:.12em; font-family:"IBM Plex Mono",monospace; margin-top:2px; }
+.side .s-item{ display:flex; align-items:center; gap:12px; width:100%; padding:11px 12px; border-radius:12px; border:0; background:none; color:#C2B29A; cursor:pointer; font-size:14px; font-weight:600; text-align:left; white-space:nowrap; }
+.side .s-item svg{ width:20px; height:20px; flex:0 0 auto; stroke:currentColor; fill:none; stroke-width:1.8; stroke-linecap:round; stroke-linejoin:round; }
+.side .s-item:hover{ background:#2A251E; color:#F2EFE6; }
+.side .s-item.active{ background:#3A3126; color:#F2EFE6; box-shadow:inset 3px 0 0 #B99A63; }
+.side .s-item:focus-visible, .side .s-acc button:focus-visible{ outline:2px solid #B99A63; outline-offset:2px; }
+.side .s-fill{ flex:1; }
+.side .s-user{ border-top:1px solid #34302A; padding:14px 6px 0; display:flex; flex-direction:column; gap:10px; }
+.side .s-user .nm{ color:#F2EFE6; font-weight:700; font-size:13.5px; line-height:1.25; overflow-wrap:anywhere; }
+.side .s-user .rl{ color:#9A9284; font-size:12px; margin-top:2px; }
+.side .s-acc{ display:flex; gap:6px; }
+.side .s-acc button{ display:inline-flex; align-items:center; justify-content:center; gap:8px; border:1px solid #3E382F; background:#24201A; color:#C2B29A; border-radius:10px; padding:8px 10px; cursor:pointer; font-size:13px; font-weight:600; }
+.side .s-acc button:hover{ border-color:#B99A63; color:#F2EFE6; }
+.side .s-acc button svg{ width:17px; height:17px; stroke:currentColor; fill:none; stroke-width:1.8; stroke-linecap:round; stroke-linejoin:round; }
+.side .s-acc #logoutBtn{ flex:1; }
+.side-min .side .s-lbl, .side-min .side .s-user .nm, .side-min .side .s-user .rl{ display:none; }
+.side-min .side .s-item{ justify-content:center; padding:11px 0; }
+.side-min .side .s-brand{ justify-content:center; padding-left:0; padding-right:0; }
+.side-min .side .s-acc{ flex-direction:column; }
+.side-min .side .s-acc #sideToggle svg{ transform:rotate(180deg); }
 
 /* ---------- generic ---------- */
 .btn{
@@ -238,7 +272,7 @@ td.num{ font-variant-numeric:tabular-nums; font-family:"IBM Plex Mono",monospace
 /* ---------- login ---------- */
 .login-shell{ min-height:100vh; display:flex; align-items:center; justify-content:center; padding:24px; }
 .login-card{ width:100%; max-width:400px; }
-.login-card .mark-big{ width:44px; height:66px; margin-bottom:16px; }
+.login-card .mark-big{ width:56px; height:56px; margin-bottom:16px; }
 .role-choice{ display:grid; grid-template-columns:repeat(auto-fit,minmax(96px,1fr)); gap:10px; margin-bottom:16px; }
 .role-btn{ border:1.5px solid var(--border); background:var(--surface); border-radius:var(--radius-md); padding:15px 10px; text-align:center; cursor:pointer; }
 .role-btn b{ display:block; font-size:14px; margin-bottom:2px; }
@@ -258,6 +292,34 @@ td.num{ font-variant-numeric:tabular-nums; font-family:"IBM Plex Mono",monospace
 .user-row .cg{ font-size:12.5px; color:var(--muted); line-height:1.3; margin-top:1px; }
 .grp-titulo{ font-family:"IBM Plex Mono",monospace; font-size:11px; letter-spacing:.1em; text-transform:uppercase; color:var(--muted); margin:14px 0 8px; }
 @media (max-width:420px){ .login-shell{ padding:10px; align-items:flex-start; } .login-card{ padding:16px; } .role-choice{ grid-template-columns:1fr 1fr; } }
+/* ingreso: pantalla oscura completa (en celular y en escritorio) */
+.login-dark{
+  --bg:#17130E; --surface:#221C15; --surface-2:#2B241A; --surface-3:#362D20; --border:#463A28;
+  --ink:#F5EFE2; --ink-soft:#D2C1A3; --muted:#A79980; --accent:#D2B378; --accent-strong:#E6C88F; --accent-bg:#332A1B; --on-accent:#241A0C;
+  --shadow:none; --green:#6FBB8B; --green-bg:#1B2B21; --amber:#E0BD63; --amber-bg:#332918; --red:#E5978C; --red-bg:#332019;
+  --danger:#E5978C; --danger-bg:#332019;
+  color-scheme:dark; color:var(--ink);
+  min-height:100vh; background:#1A1815; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:22px; padding:36px 18px;
+}
+.login-dark .ld-head{ text-align:center; max-width:520px; }
+.login-dark .mark-big{ width:68px; height:68px; margin:0 auto 14px; }
+.login-dark .ld-head h1{ font-size:30px; line-height:1.15; color:#F5EFE2; }
+.login-dark .ld-head p{ color:#C2B29A; margin:8px 0 12px; font-size:14.5px; }
+.login-dark .ld-body{ width:100%; max-width:560px; background:#221C15; border:1px solid #34302A; border-radius:22px; padding:24px; }
+.login-dark .ld-q{ margin:0 0 14px; font-size:15px; color:#D2C1A3; text-align:center; }
+.login-dark .role-choice{ display:flex; flex-wrap:wrap; gap:10px; justify-content:center; margin-bottom:6px; }
+.login-dark .role-btn{ min-width:128px; font:inherit; color:#F5EFE2; background:transparent; border:1px solid #5A4E3A; border-radius:999px; padding:12px 22px; cursor:pointer; }
+.login-dark .role-btn:hover, .login-dark .role-btn:focus-visible{ border-color:#B99A63; background:#2B241A; }
+.login-dark .role-btn b{ display:block; font-size:15px; }
+.login-dark .role-btn span{ font-size:11.5px; color:#A79980; }
+.login-dark .role-btn.reg{ border-color:#B99A63; background:#3A3126; }
+.login-dark .ld-sep{ display:flex; align-items:center; gap:12px; margin:18px 0 14px; color:#8A8071; font-size:11.5px; letter-spacing:.12em; text-transform:uppercase; font-family:"IBM Plex Mono",monospace; }
+.login-dark .ld-sep::before, .login-dark .ld-sep::after{ content:""; flex:1; height:1px; background:#34302A; }
+.login-dark .ld-foot{ color:#7E7566; font-size:12px; font-family:"IBM Plex Mono",monospace; letter-spacing:.06em; }
+.login-dark .user-row{ background:#2B241A; border-color:#463A28; }
+.login-dark .user-row .ico{ background:#3A3126; color:#D2B378; font-weight:700; font-size:14px; letter-spacing:.02em; }
+.login-dark .user-row:hover, .login-dark .user-row:active{ border-color:#B99A63; background:#332A1B; }
+@media (max-width:520px){ .login-dark{ padding:24px 12px; justify-content:flex-start; } .login-dark .ld-body{ padding:16px; } .login-dark .role-btn{ flex:1 1 40%; min-width:0; } }
 .item-row .info .m{ font-size:12px; color:var(--muted); font-family:"IBM Plex Mono",monospace; }
 
 .searchbar{ position:relative; margin-bottom:14px; }
@@ -319,16 +381,27 @@ var BANDA_POR_ID = {}; BANDAS.forEach(function(b){ BANDA_POR_ID[b.id] = b; });
 function bandaDe(dias){ return dias<=0?"vencido":dias<=30?"b1":dias<=60?"b2":dias<=90?"b3":"b4"; }
 function esc(s){ return String(s==null?"":s).replace(/[&<>"']/g, function(c){ return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]; }); }
 function uid(){ return Math.random().toString(36).slice(2,10) + Date.now().toString(36).slice(-4); }
+/* Logo: semáforo en cápsula sobre cuadrado oscuro, con borde dorado (colores fijos: se ve igual en tema claro y oscuro). */
 function iconSemaforo(){
-  return '<svg viewBox="0 0 32 48" xmlns="http://www.w3.org/2000/svg" style="width:100%;height:100%;display:block;">'+
-    '<rect x="1.5" y="1.5" width="29" height="45" rx="11" fill="#241B10" stroke="#3A2C1A" stroke-width="1"/>'+
-    '<circle cx="16" cy="12" r="7" fill="#3A2C1A"/>'+
-    '<circle cx="16" cy="12" r="5.5" fill="var(--red)"/>'+
-    '<circle cx="16" cy="24" r="7" fill="#3A2C1A"/>'+
-    '<circle cx="16" cy="24" r="5.5" fill="var(--amber)"/>'+
-    '<circle cx="16" cy="36" r="7" fill="#3A2C1A"/>'+
-    '<circle cx="16" cy="36" r="5.5" fill="var(--green)"/>'+
+  return '<svg viewBox="0 0 84 84" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Semáforos de vencimiento" style="width:100%;height:100%;display:block;">'+
+    '<rect x="2" y="2" width="80" height="80" rx="21" fill="#1A1815"/>'+
+    '<rect x="29" y="12" width="26" height="60" rx="13" fill="#2A2620" stroke="#B99A63" stroke-width="2.5"/>'+
+    '<circle cx="42" cy="28" r="6.5" fill="#E5594D"/>'+
+    '<circle cx="42" cy="42" r="6.5" fill="#EBC13F"/>'+
+    '<circle cx="42" cy="56" r="6.5" fill="#2F9A5C"/>'+
   '</svg>';
+}
+/* Íconos del menú lateral (trazo, sin librerías externas) */
+function iconNav(n){
+  var p = {
+    chart:'<path d="M4 20V10M10 20V4M16 20v-8M2 20h20"/>',
+    folder:'<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>',
+    grid:'<rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/>',
+    users:'<circle cx="9" cy="8" r="3.5"/><path d="M2.5 20c0-3.6 2.9-6 6.5-6s6.5 2.4 6.5 6"/><path d="M17 5.2a3.5 3.5 0 0 1 0 5.6M21.5 20c0-2.6-1.4-4.6-3.5-5.5"/>',
+    out:'<path d="M15 4h3a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2h-3"/><path d="M10 8l-4 4 4 4M6 12h10"/>',
+    chev:'<path d="M14 7l-5 5 5 5"/>'
+  };
+  return '<svg viewBox="0 0 24 24" aria-hidden="true">'+(p[n]||"")+'</svg>';
 }
 /* ---- ciudades, roles y usuarios ----
    Cada usuario es un documento en "usuarios" con id "<C.O.>-<nombre-normalizado>" y campos
@@ -440,6 +513,7 @@ function claveItem(it){ var b = String(it.bodega||"").trim(), r = String(it.refe
 function ciudadPorBodega(bodega){ var p = String(bodega||"").slice(0,2); return CIUDADES.filter(function(c){ return c.bodegaPref===p; })[0] || null; }
 function slugNombre(s){ return String(s||"").normalize("NFD").replace(/[̀-ͯ]/g,"").toLowerCase().replace(/[^a-z0-9]+/g,"-").replace(/^-+|-+$/g,""); }
 function userId(co, nombre){ return co+"-"+slugNombre(nombre); }
+function iniciales(n){ var p = String(n||"").trim().split(/\s+/).filter(Boolean); return ((p[0]||"").charAt(0)+(p.length>1?p[1].charAt(0):"")).toUpperCase() || "?"; }
 function primerNombre(n){ return String(n||"").trim().split(/\s+/)[0]||""; }
 function nombreDe(id){
   if(!id) return "";
@@ -1090,11 +1164,12 @@ function renderLogin(){
       '<div class="field"><label>Nombre completo</label><input id="setupNombre" placeholder="Nombre y apellido"></div>'+
       '<button class="btn primary block" id="setupGo">Crear administrador y entrar</button>';
   } else if(!co){
-    cuerpo = '<p class="hint" style="margin-bottom:12px;">Elige tu ciudad (C.O.) para continuar.</p>'+
+    cuerpo = '<p class="ld-q">Elige tu ciudad para entrar</p>'+
       '<div class="role-choice">'+
-        CIUDADES.map(function(c){ return '<div class="role-btn" data-co="'+c.co+'"><b>'+esc(c.nombre)+'</b><span>C.O. '+c.co+'</span></div>'; }).join("")+
-        '<div class="role-btn" data-co="REG"><b>Regional</b><span>Administrador</span></div>'+
-      '</div>';
+        CIUDADES.map(function(c){ return '<button type="button" class="role-btn" data-co="'+c.co+'"><b>'+esc(c.nombre)+'</b><span>C.O. '+c.co+'</span></button>'; }).join("")+
+      '</div>'+
+      '<div class="ld-sep"><span>Administración</span></div>'+
+      '<div class="role-choice"><button type="button" class="role-btn reg" data-co="REG"><b>Regional</b><span>Administrador</span></button></div>';
   } else if(co==="REG" && Store.tieneClaves()){
     cuerpo = '<button class="btn ghost sm" id="loginBack" style="margin-bottom:8px;">← Cambiar ciudad</button>'+
       '<p class="eyebrow">Administrador · '+esc(REGIONAL.nombre)+'</p>'+
@@ -1113,21 +1188,20 @@ function renderLogin(){
         if(!grupo.length) return "";
         var titulo = rol==="coordinador" ? "Coordinadores y supervisores" : rol==="operario" ? "Auxiliares de bodega" : "Administrador";
         return '<p class="grp-titulo">'+titulo+'</p>'+grupo.map(function(u){
-          return '<div class="user-row" data-uid="'+esc(u.id)+'" role="button" tabindex="0"><div class="ico">👤</div><div><div class="nm">'+esc(u.nombre)+'</div><div class="cg">'+esc(u.cargo||ROL_LABEL[u.rol]||"")+'</div></div></div>';
+          return '<div class="user-row" data-uid="'+esc(u.id)+'" role="button" tabindex="0"><div class="ico">'+esc(iniciales(u.nombre))+'</div><div><div class="nm">'+esc(u.nombre)+'</div><div class="cg">'+esc(u.cargo||ROL_LABEL[u.rol]||"")+'</div></div></div>';
         }).join("");
       }).join("") : '<div class="card empty">Todavía no hay usuarios en esta ciudad. Pide al administrador que los registre.</div>');
   }
   root.innerHTML =
-  '<div class="login-shell"><div class="login-card card" style="position:relative;">'+
-    '<button id="themeToggle" title="Cambiar apariencia" style="position:absolute;top:20px;right:20px;">'+(getTheme()==="dark"?"☀️":"🌙")+'</button>'+
-    '<div class="mark-big">'+iconSemaforo()+'</div>'+
-    '<div style="margin-bottom:8px;">'+renderSyncBadge()+'</div>'+
-    '<p class="eyebrow">Pruebas · Eje Cafetero</p>'+
-    '<h1 style="font-size:24px;margin-bottom:12px;">Semáforos de Vencimiento</h1>'+
-    cuerpo+
-  '</div></div>';
+  '<div class="login-dark">'+
+    '<div class="ld-head"><div class="mark-big">'+iconSemaforo()+'</div>'+
+      '<h1>Semáforos de vencimiento</h1>'+
+      '<p>Control en línea del producto próximo a vencer · Eje Cafetero</p>'+
+      '<div>'+renderSyncBadge()+'</div></div>'+
+    '<div class="ld-body">'+cuerpo+'</div>'+
+    '<div class="ld-foot">DISLICORES · LOGÍSTICA · PRUEBAS</div>'+
+  '</div>';
 
-  root.querySelector("#themeToggle").onclick = toggleTheme;
   root.querySelectorAll("[data-co]").forEach(function(b){ b.onclick = function(){ state._loginCo = b.getAttribute("data-co"); render(); }; });
   var back = root.querySelector("#loginBack"); if(back) back.onclick = function(){ state._loginCo = null; render(); };
   root.querySelectorAll("[data-uid]").forEach(function(r){
@@ -1173,6 +1247,42 @@ function renderSyncBadge(){
   }
   return '<span class="pill neutral dot" title="Conectando...">Conectando…</span>';
 }
+/* ---- menú lateral de escritorio (coordinador y administrador); en pantallas pequeñas se usa la barra de siempre ---- */
+function usaShell(){
+  try{ return !!state.identity && state.identity.rol!=="operario" && window.matchMedia("(min-width:1024px)").matches; }catch(e){ return false; }
+}
+function sideMin(){ try{ return localStorage.getItem("semaforos_side_min")==="1"; }catch(e){ return false; } }
+function seccionActual(){
+  var id = state.identity, t = state.adminTab;
+  if(state.view==="detail" && state.currentCargaId) return "cargas";
+  if(id.rol==="administrador" && (t==="consolidado" || t==="usuarios" || t==="matriz")) return t;
+  if(id.rol!=="administrador" && t==="matriz") return "matriz";
+  return "cargas";
+}
+function tituloSeccion(){
+  var esAdmin = state.identity.rol==="administrador", s = seccionActual();
+  if(state.view==="detail" && state.currentCargaId){
+    var c = (state.cargas||[]).filter(function(x){ return x.id===state.currentCargaId; })[0];
+    return c ? "Carga · "+c.ciudad : "Carga";
+  }
+  return s==="consolidado" ? "Informe consolidado" : s==="usuarios" ? "Usuarios" : s==="matriz" ? "Matriz de asignación" : (esAdmin ? "Cargas por ciudad" : "Cargas");
+}
+function renderSide(){
+  var id = state.identity, esAdmin = id.rol==="administrador", act = seccionActual();
+  function it(k, label, ico){ return '<button class="s-item'+(act===k?" active":"")+'" data-nav="'+k+'" title="'+esc(label)+'">'+iconNav(ico)+'<span class="s-lbl">'+esc(label)+'</span></button>'; }
+  return '<aside class="side" aria-label="Menú principal">'+
+    '<div class="s-brand"><div class="mark">'+iconSemaforo()+'</div><div class="s-lbl"><b>Semáforos</b><small>VENCIMIENTO</small></div></div>'+
+    (esAdmin ? it("consolidado","Informe consolidado","chart") : "")+
+    it("cargas", esAdmin ? "Cargas por ciudad" : "Cargas", "folder")+
+    it("matriz","Matriz de asignación","grid")+
+    (esAdmin ? it("usuarios","Usuarios","users") : "")+
+    '<div class="s-fill"></div>'+
+    '<div class="s-user"><div class="s-lbl"><div class="nm">'+esc(id.nombre)+'</div><div class="rl">'+esc(ROL_LABEL[id.rol]||id.rol)+(id.rol!=="administrador"&&id.ciudad?" · "+esc(id.ciudad):"")+'</div></div>'+
+      '<div class="s-acc"><button id="themeToggle" title="Cambiar apariencia">'+(getTheme()==="dark"?"☀️":"🌙")+'</button>'+
+      '<button id="logoutBtn" title="Salir">'+iconNav("out")+'<span class="s-lbl">Salir</span></button>'+
+      '<button id="sideToggle" title="Plegar o desplegar el menú" aria-label="Plegar o desplegar el menú">'+iconNav("chev")+'</button></div></div>'+
+  '</aside>';
+}
 function renderTopbar(){
   var id = state.identity;
   if(id.rol==="operario"){
@@ -1184,6 +1294,10 @@ function renderTopbar(){
         '<span class="sync-dot '+(state.syncMode==="db"?"ok":"local")+'" title="'+(state.syncMode==="db"?"Sincronizado":"Sin sincronizar")+'"></span>'+
         '<button id="themeToggle" title="Cambiar apariencia">'+(getTheme()==="dark"?"☀️":"🌙")+'</button>'+
         '<button id="logoutBtn">Salir</button></div></div>';
+  }
+  if(usaShell()){
+    /* Escritorio: menú lateral oscuro + barra superior con el título de la sección */
+    return renderSide()+'<div class="topbar shellbar"><div class="sh-title">'+esc(tituloSeccion())+'</div><div class="who">'+renderSyncBadge()+'</div></div>';
   }
   return '<div class="topbar">'+
     '<div class="brand"><div class="mark">'+iconSemaforo()+'</div><div><b>Semáforos</b><div class="sub">PRUEBAS · EJE CAFETERO</div></div></div>'+
@@ -1202,13 +1316,19 @@ function wireTopbar(){
   };
   var t = root.querySelector("#themeToggle");
   if(t) t.onclick = toggleTheme;
+  /* menú lateral: navegar y plegar */
+  root.querySelectorAll(".side [data-nav]").forEach(function(b){
+    b.onclick = function(){ state.adminTab = b.getAttribute("data-nav"); state.view = "list"; state._volverCarga = null; render(); };
+  });
+  var st = root.querySelector("#sideToggle");
+  if(st) st.onclick = function(){ try{ localStorage.setItem("semaforos_side_min", sideMin() ? "0" : "1"); }catch(e){} render(); };
 }
 
 /* ================= administrador ================= */
 function renderAdminNav(active){
   var esAdmin = state.identity.rol==="administrador";
   function t(k, label){ return '<button data-nav="'+k+'" class="'+(active===k?"active":"")+'">'+label+'</button>'; }
-  return '<div class="tabs">'+
+  return '<div class="tabs admin-nav">'+
     (esAdmin ? t("consolidado","Informe consolidado") : "")+
     t("cargas", esAdmin ? "Cargas por ciudad" : "Cargas")+
     t("matriz","Matriz de asignación")+
@@ -3199,6 +3319,8 @@ function renderOperarioEntry(){
 
 /* ================= main render dispatcher ================= */
 function render(){
+  root.classList.toggle("shell", usaShell());
+  root.classList.toggle("side-min", usaShell() && sideMin());
   if(!state.identity){ renderLogin(); return; }
   if(state.identity.rol === "administrador"){
     if(state.view==="detail" && state.currentCargaId) renderCoordinadorDetail();
@@ -3216,6 +3338,9 @@ function render(){
     else renderOperarioHome();
   }
 }
+
+/* al cruzar el ancho de escritorio (por ejemplo, girar o redimensionar la ventana) se redibuja con el diseño que corresponde */
+try{ var mqEscritorio = window.matchMedia("(min-width:1024px)"); if(mqEscritorio.addEventListener) mqEscritorio.addEventListener("change", function(){ render(); }); else if(mqEscritorio.addListener) mqEscritorio.addListener(function(){ render(); }); }catch(e){}
 
 /* ================= boot ================= */
 (async function boot(){
