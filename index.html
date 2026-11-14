@@ -3037,6 +3037,23 @@ function fechaDeSelects(){
   return y+"-"+("0"+m).slice(-2)+"-"+("0"+d).slice(-2);
 }
 
+/* La pantalla se actualiza en el momento en que el servidor confirma el cambio; la sincronización periódica solo confirma después.
+   Sin esto, con una conexión lenta la referencia recién terminada seguía apareciendo como "siguiente producto". */
+function itemLocal(id){ return state.items.find(function(x){ return x.id===id; }); }
+function parcheLocalFisico(g, f){
+  var rep = repartirFisico(f, g);
+  g.ids.forEach(function(id){ var x = itemLocal(id); if(!x) return; x.registros = rep[id]; x.estado = f.length ? "en_progreso" : "pendiente"; if(id===g.lead) x.fisico = f; });
+}
+function parcheLocalAdd(it, g, lote){
+  if(g){ var lead = itemLocal(g.lead); if(lead) parcheLocalFisico(g, (lead.fisico||[]).concat([lote])); }
+  else { var x = itemLocal(it.id); if(x){ x.registros = (x.registros||[]).concat([lote]); x.estado = "en_progreso"; } }
+}
+function parcheLocalRemove(it, g, idx){
+  if(g){ var lead = itemLocal(g.lead); if(lead){ var f = (lead.fisico||[]).slice(); f.splice(idx,1); parcheLocalFisico(g, f); } }
+  else { var x = itemLocal(it.id); if(x){ x.registros = (x.registros||[]).slice(); x.registros.splice(idx,1); x.estado = x.registros.length ? "en_progreso" : "pendiente"; } }
+}
+function parcheLocalFinal(ids){ ids.forEach(function(id){ var x = itemLocal(id); if(x) x.estado = "finalizado"; }); }
+
 function renderOperarioEntry(){
   var it = state.items.find(function(x){return x.id===state.activeItemId;});
   if(!it){ setState({view:"mine"}); return; }
@@ -3134,6 +3151,7 @@ function renderOperarioEntry(){
       };
       if(g) await Store.addRegistroGrupo(state.currentCargaId, g, nuevoLote);
       else await Store.addRegistro(state.currentCargaId, it.id, nuevoLote);
+      parcheLocalAdd(it, g, nuevoLote);   /* la pantalla refleja el conteo al instante, sin esperar la sincronización */
       state._entryCantidad = ""; state._entryManualConfirm = false; state._entryScannedCode = null;
       state._entryFecha = ""; state._eD = ""; state._eM = ""; state._eY = "";
       render();
@@ -3149,13 +3167,22 @@ function renderOperarioEntry(){
       try{
         var ix = parseInt(b.getAttribute("data-idx"),10);
         if(g) await Store.removeRegistroGrupo(state.currentCargaId, g, ix); else await Store.removeRegistro(state.currentCargaId, it.id, ix);
+        parcheLocalRemove(it, g, ix);
         render();
       }
       finally{ state._borrandoConteo = false; }
     };
   });
   var doneBtn = root.querySelector("#btnDone");
-  if(doneBtn) doneBtn.onclick = async function(){ if(g) await Store.finalizarGrupo(state.currentCargaId, g); else await Store.finalizarItem(state.currentCargaId, it.id); setState({view:"mine"}); };
+  if(doneBtn) doneBtn.onclick = async function(){
+    if(state._finalizandoItem) return;
+    state._finalizandoItem = true; doneBtn.disabled = true;
+    try{
+      if(g) await Store.finalizarGrupo(state.currentCargaId, g); else await Store.finalizarItem(state.currentCargaId, it.id);
+      parcheLocalFinal(g ? g.ids : [it.id]);   /* la referencia ya no aparece como "siguiente producto" */
+      setState({view:"mine"});
+    } finally { state._finalizandoItem = false; }
+  };
 }
 
 /* ================= main render dispatcher ================= */
