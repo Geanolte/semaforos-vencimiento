@@ -421,8 +421,10 @@ var CIUDADES = [
   {co:"018", nombre:"Neiva",     bodegaPref:"18", scan:"camara"}
 ];
 var REGIONAL = {co:"REG", nombre:"Eje Cafetero"};
+/* Enlace a la app de Operaciones: oculto hasta que se comparta con el equipo. Para mostrarlo, cambiar a true y regenerar el index.html. */
+var MOSTRAR_ENLACE_OPS = false;
 var OPS_URL = "https://geanolte.github.io/operaciones-dislicores/";
-function opsLink(){ return '<a class="opslink" href="'+OPS_URL+'" title="Ir a Operaciones (alistamiento y despacho)">Operaciones</a>'; }
+function opsLink(){ return MOSTRAR_ENLACE_OPS ? '<a class="opslink" href="'+OPS_URL+'" title="Ir a Operaciones (alistamiento y despacho)">Operaciones</a>' : ''; }
 var ROL_LABEL = {administrador:"Administrador", coordinador:"Coordinador / Supervisor", operario:"Auxiliar de bodega"};
 function ciudadPorCo(co){ return CIUDADES.filter(function(c){ return c.co===co; })[0] || null; }
 function ciudadPorNombre(n){ return CIUDADES.filter(function(c){ return c.nombre===n; })[0] || null; }
