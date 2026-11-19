@@ -292,34 +292,29 @@ td.num{ font-variant-numeric:tabular-nums; font-family:"JetBrains Mono",monospac
 .user-row .cg{ font-size:12.5px; color:var(--muted); line-height:1.3; margin-top:1px; }
 .grp-titulo{ font-family:"JetBrains Mono",monospace; font-size:11px; letter-spacing:.1em; text-transform:uppercase; color:var(--muted); margin:14px 0 8px; }
 @media (max-width:420px){ .login-shell{ padding:10px; align-items:flex-start; } .login-card{ padding:16px; } .role-choice{ grid-template-columns:1fr 1fr; } }
-/* ingreso: pantalla oscura completa (en celular y en escritorio) */
-.login-dark{
-  --bg:#0F0E0C; --surface:#1A1916; --surface-2:#221F1B; --surface-3:#2E2B26; --border:#2E2B26;
-  --ink:#F0ECE4; --ink-soft:#B0A898; --muted:#8A8378; --accent:#C2AA5B; --accent-strong:#D4BF7A; --accent-bg:#2B2516; --on-accent:#17130E;
-  --shadow:none; --green:#6FBB8B; --green-bg:#1B2B21; --amber:#E0BD63; --amber-bg:#332918; --red:#E5978C; --red-bg:#332019;
-  --danger:#E5978C; --danger-bg:#332019;
-  color-scheme:dark; color:var(--ink);
-  min-height:100vh; background:#0A0A0A; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:22px; padding:36px 18px;
-}
-.login-dark .ld-head{ text-align:center; max-width:520px; }
-.login-dark .mark-big{ width:68px; height:68px; margin:0 auto 14px; }
-.login-dark .ld-head h1{ font-size:30px; line-height:1.15; color:#F0ECE4; }
-.login-dark .ld-head p{ color:#C2B29A; margin:8px 0 12px; font-size:14.5px; }
-.login-dark .ld-body{ width:100%; max-width:560px; background:#1A1916; border:1px solid #34302A; border-radius:22px; padding:24px; }
-.login-dark .ld-q{ margin:0 0 14px; font-size:15px; color:#B0A898; text-align:center; }
-.login-dark .role-choice{ display:flex; flex-wrap:wrap; gap:10px; justify-content:center; margin-bottom:6px; }
-.login-dark .role-btn{ min-width:128px; font:inherit; color:#F0ECE4; background:transparent; border:1px solid #5A4E3A; border-radius:999px; padding:12px 22px; cursor:pointer; }
-.login-dark .role-btn:hover, .login-dark .role-btn:focus-visible{ border-color:#C2AA5B; background:#221F1B; }
-.login-dark .role-btn b{ display:block; font-size:15px; }
-.login-dark .role-btn span{ font-size:11.5px; color:#8A8378; }
-.login-dark .role-btn.reg{ border-color:#C2AA5B; background:#242424; }
-.login-dark .ld-sep{ display:flex; align-items:center; gap:12px; margin:18px 0 14px; color:#8A8071; font-size:11.5px; letter-spacing:.12em; text-transform:uppercase; font-family:"JetBrains Mono",monospace; }
-.login-dark .ld-sep::before, .login-dark .ld-sep::after{ content:""; flex:1; height:1px; background:#34302A; }
-.login-dark .ld-foot{ color:#7E7566; font-size:12px; font-family:"JetBrains Mono",monospace; letter-spacing:.06em; }
-.login-dark .user-row{ background:#221F1B; border-color:#2E2B26; }
-.login-dark .user-row .ico{ background:#242424; color:#C2AA5B; font-weight:700; font-size:14px; letter-spacing:.02em; }
-.login-dark .user-row:hover, .login-dark .user-row:active{ border-color:#C2AA5B; background:#2B2516; }
-@media (max-width:520px){ .login-dark{ padding:24px 12px; justify-content:flex-start; } .login-dark .ld-body{ padding:16px; } .login-dark .role-btn{ flex:1 1 40%; min-width:0; } }
+/* ingreso: mismo diseño que la app de Operaciones (barra negra, tarjeta de bienvenida negra, botones con borde dorado) */
+.lgwrap{ max-width:760px; margin:0 auto; padding:14px 14px 60px; }
+.lgwrap .login{ max-width:520px; margin:0 auto; }
+.lgwrap .login-head{ background:#0A0A0A; color:#fff; border-radius:22px; padding:26px 20px; text-align:center; margin:4px 0 16px; }
+.lgwrap .login-head .mark-big{ width:56px; height:56px; margin:0 auto 12px; }
+.lgwrap .login-head small{ letter-spacing:.24em; color:#C2AA5B; font-weight:700; font-size:11px; }
+.lgwrap .login-head h1{ margin:8px 0 4px; font-size:23px; color:#fff; }
+.lgwrap .login-head p{ margin:0; color:#CFC8B8; font-size:13.5px; }
+.lgwrap .muted{ color:var(--muted); margin:6px 0; }
+.lgwrap .role-choice{ display:grid; grid-template-columns:repeat(auto-fit,minmax(130px,1fr)); gap:9px; margin:10px 0; }
+.lgwrap .role-btn{ background:var(--surface); border:1px solid var(--border); border-left:4px solid #C2AA5B; border-radius:14px; padding:13px 12px; text-align:left; cursor:pointer; box-shadow:var(--shadow); color:inherit; font:inherit; min-width:0; }
+.lgwrap .role-btn:hover, .lgwrap .role-btn:focus-visible{ border-color:#C2AA5B; }
+.lgwrap .role-btn b{ display:block; font-size:15px; }
+.lgwrap .role-btn span{ font-size:12px; color:var(--muted); }
+.lgwrap .sep{ display:flex; align-items:center; gap:10px; color:var(--muted); font-size:12px; margin:14px 0 6px; text-transform:uppercase; letter-spacing:.05em; }
+.lgwrap .sep::before, .lgwrap .sep::after{ content:""; flex:1; height:1px; background:var(--border); }
+.lgwrap .user-row{ display:flex; gap:11px; align-items:center; background:var(--surface); border:1px solid var(--border); border-radius:14px; padding:10px 12px; margin:7px 0; cursor:pointer; }
+.lgwrap .user-row:hover, .lgwrap .user-row:active{ border-color:#C2AA5B; background:var(--surface); }
+.lgwrap .user-row .ico{ flex:none; width:38px; height:38px; border-radius:50%; background:#0A0A0A; color:#C2AA5B; display:grid; place-items:center; font-weight:700; font-size:13px; }
+:root[data-theme="dark"] .lgwrap .user-row .ico{ background:#C2AA5B; color:#17130E; }
+.lgwrap .user-row .nm{ font-weight:600; font-size:15px; }
+.lgwrap .user-row .cg{ font-size:12px; color:var(--muted); }
+.lgwrap .footer-note{ text-align:center; font-size:12px; color:var(--muted); margin-top:26px; }
 .item-row .info .m{ font-size:12px; color:var(--muted); font-family:"JetBrains Mono",monospace; }
 
 .searchbar{ position:relative; margin-bottom:14px; }
@@ -1177,12 +1172,12 @@ function renderLogin(){
       '<div class="field"><label>Nombre completo</label><input id="setupNombre" placeholder="Nombre y apellido"></div>'+
       '<button class="btn primary block" id="setupGo">Crear administrador y entrar</button>';
   } else if(!co){
-    cuerpo = '<p class="ld-q">Elige tu ciudad para entrar</p>'+
+    cuerpo = '<p class="muted">Elige tu ciudad para entrar</p>'+
       '<div class="role-choice">'+
         CIUDADES.map(function(c){ return '<button type="button" class="role-btn" data-co="'+c.co+'"><b>'+esc(c.nombre)+'</b><span>C.O. '+c.co+'</span></button>'; }).join("")+
       '</div>'+
-      '<div class="ld-sep"><span>Administración</span></div>'+
-      '<div class="role-choice"><button type="button" class="role-btn reg" data-co="REG"><b>Regional</b><span>Administrador</span></button></div>';
+      '<div class="sep">Administración</div>'+
+      '<div class="role-choice"><button type="button" class="role-btn" data-co="REG"><b>Regional</b><span>Administrador</span></button></div>';
   } else if(co==="REG" && Store.tieneClaves()){
     cuerpo = '<button class="btn ghost sm" id="loginBack" style="margin-bottom:8px;">← Cambiar ciudad</button>'+
       '<p class="eyebrow">Administrador · '+esc(REGIONAL.nombre)+'</p>'+
@@ -1205,15 +1200,17 @@ function renderLogin(){
         }).join("");
       }).join("") : '<div class="card empty">Todavía no hay usuarios en esta ciudad. Pide al administrador que los registre.</div>');
   }
+  /* Mismo diseño de ingreso que la app de Operaciones: barra negra, tarjeta de bienvenida negra y botones con borde dorado */
   root.innerHTML =
-  '<div class="login-dark">'+
-    '<div class="ld-head"><div class="mark-big">'+iconSemaforo()+'</div>'+
-      '<h1>Semáforos de vencimiento</h1>'+
-      '<p>Control en línea del producto próximo a vencer · Eje Cafetero</p>'+
-      '<div>'+renderSyncBadge()+'</div></div>'+
-    '<div class="ld-body">'+cuerpo+'</div>'+
-    '<div class="ld-foot">DISLICORES · LOGÍSTICA · PRUEBAS</div>'+
-  '</div>';
+  '<div class="topbar"><div class="brand"><div class="mark">'+iconSemaforo()+'</div><div><b>Semáforos de vencimiento</b><div class="sub">Ingreso</div></div></div>'+
+    '<div class="who">'+renderSyncBadge()+'<button id="themeToggle" title="Cambiar apariencia">'+(getTheme()==="dark"?"☀️":"🌙")+'</button></div></div>'+
+  '<main class="lgwrap"><div class="login">'+
+    '<div class="login-head"><div class="mark-big">'+iconSemaforo()+'</div><small>DISLICORES</small><h1>Semáforos de vencimiento</h1>'+
+      '<p>Control en línea del producto próximo a vencer · Eje Cafetero</p></div>'+
+    cuerpo+
+    '<p class="footer-note">Logística · Eje Cafetero</p>'+
+  '</div></main>';
+  var tt = root.querySelector("#themeToggle"); if(tt) tt.onclick = toggleTheme;
 
   root.querySelectorAll("[data-co]").forEach(function(b){ b.onclick = function(){ state._loginCo = b.getAttribute("data-co"); render(); }; });
   var back = root.querySelector("#loginBack"); if(back) back.onclick = function(){ state._loginCo = null; render(); };
